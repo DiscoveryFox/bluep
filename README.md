@@ -141,8 +141,13 @@ bluep/
 
 ## Documentation
 
-Full documentation is available in the `docs/` directory and can be served
-locally with MkDocs:
+**Online**: [https://discoveryfox.github.io/bluep/](https://discoveryfox.github.io/bluep/)
+
+The docs site is built and deployed automatically by a GitHub Actions workflow
+(`.github/workflows/docs.yml`) on every push to `master` that touches `docs/`
+or `mkdocs.yml`.
+
+**Locally**: serve the docs with MkDocs:
 
 ```bash
 uv run mkdocs serve
