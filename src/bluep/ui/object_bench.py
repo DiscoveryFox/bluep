@@ -167,7 +167,7 @@ class ObjectTile(Gtk.DrawingArea):
     def _on_released(self, gesture: Gtk.GestureClick, n_press: int, x: float, y: float) -> None:
         pass
 
-    def _on_enter(self, controller: Gtk.EventControllerMotion) -> None:
+    def _on_enter(self, controller: Gtk.EventControllerMotion, x: float, y: float) -> None:
         self.hovered = True
         self.queue_draw()
 

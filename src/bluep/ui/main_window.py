@@ -126,6 +126,7 @@ class MainWindow(Gtk.ApplicationWindow):
         menu.append("Show Code Pad", "win.show-code-pad")
         menu.append("Show Debugger", "win.show-debugger")
         menu.append("Show AI Panel", "win.show-ai")
+        menu.append("Toggle Bottom Panel", "win.toggle-bottom-panel")
         menu.append_section(None, Gio.Menu.new())
         menu.append("Preferences", "win.preferences")
         menu.append("About", "win.about")
@@ -195,11 +196,12 @@ class MainWindow(Gtk.ApplicationWindow):
         top_paned.set_end_child(editor_box)
         top_paned.set_shrink_end_child(False)
 
-        main_box.append(top_paned)
+        # --- Upper section: diagram+editor + object bench ---
+        upper_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        upper_box.append(top_paned)
 
-        # --- Object bench ---
         bench_separator = Gtk.Separator.new(Gtk.Orientation.HORIZONTAL)
-        main_box.append(bench_separator)
+        upper_box.append(bench_separator)
 
         bench_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
         bench_label = Gtk.Label.new("Object Bench")
@@ -214,11 +216,11 @@ class MainWindow(Gtk.ApplicationWindow):
         self.object_bench.connect("bench-right-clicked", self._on_bench_right_clicked)
         bench_box.append(self.object_bench)
 
-        main_box.append(bench_box)
+        upper_box.append(bench_box)
 
         # --- Bottom notebook: Terminal, Code Pad, Debugger, AI ---
-        bottom_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
-        bottom_box.set_size_request(-1, 200)
+        self._bottom_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._bottom_box.set_size_request(-1, 200)
 
         self._bottom_notebook = Gtk.Notebook.new()
         self._bottom_notebook.add_css_class("bluep-notebook")
@@ -248,8 +250,18 @@ class MainWindow(Gtk.ApplicationWindow):
         self.ai_panel = AIPanel()
         self._bottom_notebook.append_page(self.ai_panel, Gtk.Label.new("AI"))
 
-        bottom_box.append(self._bottom_notebook)
-        main_box.append(bottom_box)
+        self._bottom_box.append(self._bottom_notebook)
+
+        # --- Vertical paned: upper section (resizable) / bottom panel (resizable) ---
+        self._main_paned = Gtk.Paned.new(Gtk.Orientation.VERTICAL)
+        self._main_paned.set_vexpand(True)
+        self._main_paned.set_start_child(upper_box)
+        self._main_paned.set_shrink_start_child(False)
+        self._main_paned.set_end_child(self._bottom_box)
+        self._main_paned.set_shrink_end_child(False)
+        self._main_paned.set_position(400)
+
+        main_box.append(self._main_paned)
 
     def _build_status_bar(self) -> None:
         """Build the bottom status bar."""
@@ -291,6 +303,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "show-code-pad": (self._action_show_code_pad, None),
             "show-debugger": (self._action_show_debugger, None),
             "show-ai": (self._action_show_ai, None),
+            "toggle-bottom-panel": (self._action_toggle_bottom_panel, None),
             "preferences": (self._action_preferences, None),
             "about": (self._action_about, None),
         }
@@ -327,17 +340,18 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _action_new_project(self) -> None:
         """Create a new project."""
-        dialog = Gtk.FileChooserNative.new(
-            "Select project directory",
-            self,
-            Gtk.FileChooserAction.SELECT_FOLDER,
-            "Create",
-            "Cancel",
+        dialog = Gtk.FileChooserDialog(
+            title="Select project directory",
+            transient_for=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
         )
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Create", Gtk.ResponseType.ACCEPT)
+        dialog.set_create_folders(True)
         dialog.connect("response", self._on_new_project_response)
         dialog.show()
 
-    def _on_new_project_response(self, dialog: Gtk.FileChooserNative, response: int) -> None:
+    def _on_new_project_response(self, dialog: Gtk.FileChooserDialog, response: int) -> None:
         if response == Gtk.ResponseType.ACCEPT:
             folder = dialog.get_file().get_path()
             if folder:
@@ -346,17 +360,18 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _action_open_project(self) -> None:
         """Open an existing project."""
-        dialog = Gtk.FileChooserNative.new(
-            "Open project directory",
-            self,
-            Gtk.FileChooserAction.SELECT_FOLDER,
-            "Open",
-            "Cancel",
+        dialog = Gtk.FileChooserDialog(
+            title="Open project directory",
+            transient_for=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
         )
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Open", Gtk.ResponseType.ACCEPT)
+        dialog.set_create_folders(True)
         dialog.connect("response", self._on_open_project_response)
         dialog.show()
 
-    def _on_open_project_response(self, dialog: Gtk.FileChooserNative, response: int) -> None:
+    def _on_open_project_response(self, dialog: Gtk.FileChooserDialog, response: int) -> None:
         if response == Gtk.ResponseType.ACCEPT:
             folder = dialog.get_file().get_path()
             if folder:
@@ -481,19 +496,32 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _action_show_terminal(self) -> None:
         """Switch to the Terminal tab."""
+        self._show_bottom_panel()
         self._bottom_notebook.set_current_page(0)
 
     def _action_show_code_pad(self) -> None:
         """Switch to the Code Pad tab."""
+        self._show_bottom_panel()
         self._bottom_notebook.set_current_page(1)
 
     def _action_show_debugger(self) -> None:
         """Switch to the Debugger tab."""
+        self._show_bottom_panel()
         self._bottom_notebook.set_current_page(2)
 
     def _action_show_ai(self) -> None:
         """Switch to the AI Panel tab."""
+        self._show_bottom_panel()
         self._bottom_notebook.set_current_page(3)
+
+    def _action_toggle_bottom_panel(self) -> None:
+        """Hide or show the bottom panel (terminal area)."""
+        self._bottom_box.set_visible(not self._bottom_box.get_visible())
+
+    def _show_bottom_panel(self) -> None:
+        """Ensure the bottom panel is visible."""
+        if not self._bottom_box.get_visible():
+            self._bottom_box.set_visible(True)
 
     def _action_preferences(self) -> None:
         """Show the preferences dialog and apply settings on Apply."""
@@ -939,9 +967,13 @@ class MainWindow(Gtk.ApplicationWindow):
         self._create_bench_context_actions(name)
 
         popover = Gtk.PopoverMenu.new_from_model(menu)
+        n_methods = len(methods) if methods else 0
+        menu_height = min(n_methods * 30 + 140, 400)
+        popover.set_size_request(240, menu_height)
+        tx, ty = bench.translate_coordinates(self, x, y)
         rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
+        rect.x = int(tx)
+        rect.y = int(ty)
         rect.width = 1
         rect.height = 1
         popover.set_pointing_to(rect)
@@ -988,9 +1020,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self.add_action(act)
 
         popover = Gtk.PopoverMenu.new_from_model(menu)
+        tx, ty = bench.translate_coordinates(self, x, y)
         rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
+        rect.x = int(tx)
+        rect.y = int(ty)
         rect.width = 1
         rect.height = 1
         popover.set_pointing_to(rect)
