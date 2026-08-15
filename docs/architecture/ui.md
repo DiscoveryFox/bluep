@@ -1,0 +1,72 @@
+# UI modules
+
+## `main_window.py`
+
+The main application window. Wires together all UI components, registers
+actions (New Project, Open, Save, Compile, Preferences, etc.), manages the
+editor notebook tabs, applies supervised gating, and shows error/confirmation
+dialogs.
+
+Key responsibilities:
+
+- **Tab management** — notebook with VSCode-style tabs, save indicators (`●`
+  prefix when modified), close buttons
+- **Supervised gating** — disables AI panel and locked settings tabs when
+  `BLUEP_SUPERVISED=true`
+- **Dialogs** — error popups (`Gtk.AlertDialog`) for compile/instantiation
+  failures, confirmation dialogs for delete and unsaved-close
+- **Editor wiring** — applies `EditorConfig` to each editor on open, connects
+  modified/compile/breakpoint signals
+
+## `class_diagram.py`
+
+Visual canvas showing class boxes. Supports drag-and-drop positioning,
+dependency arrow drawing, right-click context menus, and selection.
+
+## `code_editor.py`
+
+The Python code editor. Features:
+
+- **Tab key** — intercepts Tab to insert configured spaces (fixes GTK's
+  8-space default)
+- **Autocomplete** — `Gtk.Popover` with `Gtk.ListBox`, sources from Python
+  keywords, builtins, and buffer words
+- **Bracket auto-closing** — `()`, `[]`, `{}`, `''`, `""`
+- **Auto-indent** — copies leading whitespace, adds extra indent after `:`
+- **Breakpoints** — gutter click or `Ctrl+B`
+- **Font** — applied via `Gtk.CssProvider` (works in both GtkSourceView and
+  TextView fallback paths)
+
+## `dialogs.py`
+
+Dialog windows:
+
+- `PreferencesDialog` — tabbed (General, Python, Editor, AI), supervised locks
+  Python and AI tabs
+- `RenameClassDialog` — validates empty/same/duplicate/invalid identifier,
+  emits `class-renamed` signal
+- `NewClassDialog` — name + kind selection with explanatory help text
+- `ConstructorDialog` — parameter input with tips
+- `MethodCallDialog` — method list with argument input and result display
+- `ObjectInspectorDialog` — instance and static field inspection
+
+## `object_bench.py`
+
+Bottom panel holding instantiated objects as tiles. Each tile shows the object
+name and class. Right-click for inspect, call method, remove.
+
+## `code_pad.py`
+
+REPL-style expression evaluator. Has access to all bench objects by name.
+
+## `terminal.py`
+
+Embedded terminal output for compile results and runtime messages.
+
+## `debugger_panel.py`
+
+Variable inspector and call-stack view during debugging.
+
+## `ai_panel.py`
+
+Chat interface for the AI agent. Hidden when AI is disabled or supervised.

@@ -1,0 +1,84 @@
+site_name: BlueP
+site_description: A BlueJ-inspired IDE for Python, built with GTK4 and PyGObject.
+site_url: https://discoveryfox.github.io/bluep/
+repo_url: https://github.com/DiscoveryFox/bluep
+repo_name: DiscoveryFox/bluep
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quick-start.md
+    - First Project: getting-started/first-project.md
+  - Features:
+    - Class Diagram: features/class-diagram.md
+    - Object Bench: features/object-bench.md
+    - Code Editor: features/code-editor.md
+    - Code Pad: features/code-pad.md
+    - Debugger: features/debugger.md
+    - AI Agent: features/ai-agent.md
+  - Configuration:
+    - Overview: configuration/overview.md
+    - Environment Variables: configuration/environment.md
+    - Supervised Mode: configuration/supervised-mode.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Core Modules: architecture/core.md
+    - UI Modules: architecture/ui.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search

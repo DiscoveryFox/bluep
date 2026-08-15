@@ -1,0 +1,362 @@
+/* BlueP Theme - Modern dark theme inspired by BlueJ + modern IDEs */
+
+/* Main window */
+window.bluep-main {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+}
+
+/* Header bar */
+headerbar.bluep-header {
+  background-color: #181825;
+  color: #cdd6f4;
+  border-bottom: 1px solid #313244;
+}
+
+/* Class diagram canvas */
+.bluep-diagram {
+  background-color: #1e1e2e;
+}
+
+/* Class box in the diagram */
+.bluep-class-box {
+  background-color: #313244;
+  border: 2px solid #585b70;
+  border-radius: 8px;
+  color: #cdd6f4;
+}
+
+.bluep-class-box:selected {
+  background-color: #45475a;
+  border-color: #89b4fa;
+}
+
+.bluep-class-box-abstract {
+  border-color: #f9e2af;
+  border-style: dashed;
+}
+
+.bluep-class-box-interface {
+  border-color: #a6e3a1;
+  border-style: dashed;
+}
+
+.bluep-class-box-enum {
+  border-color: #fab387;
+}
+
+.bluep-class-box-error {
+  border-color: #f38ba8;
+  border-style: dashed;
+}
+
+.bluep-class-header {
+  background-color: #45475a;
+  border-radius: 6px 6px 0 0;
+  padding: 6px 12px;
+  font-weight: bold;
+}
+
+.bluep-class-section {
+  padding: 4px 12px;
+  border-top: 1px solid #585b70;
+}
+
+.bluep-class-name {
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.bluep-class-kind {
+  font-size: 10px;
+  color: #a6adc8;
+  font-style: italic;
+}
+
+/* Object bench */
+.bluep-object-bench {
+  background-color: #181825;
+  border-top: 2px solid #313244;
+  padding: 8px;
+}
+
+.bluep-bench-object {
+  background-color: #313244;
+  border: 1px solid #585b70;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #cdd6f4;
+}
+
+.bluep-bench-object:selected {
+  background-color: #45475a;
+  border-color: #89b4fa;
+}
+
+.bluep-bench-object-name {
+  font-weight: bold;
+  color: #89b4fa;
+}
+
+.bluep-bench-object-class {
+  font-size: 11px;
+  color: #a6adc8;
+}
+
+/* Code editor */
+.bluep-editor {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Source Code Pro", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bluep-editor text {
+  background-color: #1e1e2e;
+  caret-color: #f5e0dc;
+}
+
+.bluep-editor:selected {
+  background-color: #45475a;
+}
+
+/* Autocomplete popover */
+popover.bluep-completion {
+  background-color: #181825;
+  border: 1px solid #585b70;
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+popover.bluep-completion list.bluep-completion-list {
+  background-color: transparent;
+}
+
+popover.bluep-completion row.bluep-completion-row {
+  padding: 4px 12px;
+  color: #cdd6f4;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+}
+
+popover.bluep-completion row.bluep-completion-row:selected {
+  background-color: #89b4fa;
+  color: #1e1e2e;
+}
+
+popover.bluep-completion row.bluep-completion-row:hover {
+  background-color: #313244;
+}
+
+/* Terminal */
+.bluep-terminal {
+  background-color: #11111b;
+  color: #cdd6f4;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+/* Code pad */
+.bluep-code-pad {
+  background-color: #181825;
+  color: #cdd6f4;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+/* AI panel */
+.bluep-ai-panel {
+  background-color: #181825;
+  border-left: 1px solid #313244;
+}
+
+.bluep-ai-message-user {
+  background-color: #313244;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 4px;
+  color: #cdd6f4;
+}
+
+.bluep-ai-message-assistant {
+  background-color: #45475a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 4px;
+  color: #cdd6f4;
+}
+
+.bluep-ai-message-system {
+  color: #a6adc8;
+  font-style: italic;
+  padding: 4px 12px;
+}
+
+/* Buttons */
+button.bluep-btn {
+  background-color: #313244;
+  color: #cdd6f4;
+  border-radius: 6px;
+  padding: 6px 16px;
+}
+
+button.bluep-btn:hover {
+  background-color: #45475a;
+}
+
+button.bluep-btn-primary {
+  background-color: #89b4fa;
+  color: #1e1e2e;
+  font-weight: bold;
+}
+
+button.bluep-btn-primary:hover {
+  background-color: #b4befe;
+}
+
+button.bluep-btn-danger {
+  background-color: #f38ba8;
+  color: #1e1e2e;
+}
+
+/* Search entry */
+entry.bluep-search {
+  background-color: #313244;
+  color: #cdd6f4;
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+
+/* Debug panel */
+.bluep-debug-panel {
+  background-color: #181825;
+  border-bottom: 1px solid #313244;
+}
+
+.bluep-debug-variable {
+  font-family: monospace;
+  font-size: 12px;
+  color: #cdd6f4;
+  padding: 2px 8px;
+}
+
+.bluep-debug-variable-name {
+  color: #89b4fa;
+  font-weight: bold;
+}
+
+.bluep-debug-variable-value {
+  color: #a6e3a1;
+}
+
+/* Status bar */
+.bluep-status-bar {
+  background-color: #181825;
+  color: #a6adc8;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* Tooltips */
+tooltip {
+  background-color: #45475a;
+  color: #cdd6f4;
+  border-radius: 4px;
+}
+
+/* Scrollbars */
+scrollbar {
+  background-color: #1e1e2e;
+}
+
+scrollbar slider {
+  background-color: #585b70;
+  border-radius: 3px;
+  min-width: 8px;
+  min-height: 8px;
+}
+
+scrollbar slider:hover {
+  background-color: #6c7086;
+}
+
+/* Paned separators */
+paned > separator {
+  background-color: #313244;
+}
+
+notebook.bluep-notebook > header {
+  background-color: #181825;
+  border-bottom: 1px solid #313244;
+}
+
+notebook.bluep-notebook > header > tabs > tab {
+  background-color: transparent;
+  color: #6c7086;
+  padding: 4px 10px;
+  border-radius: 0;
+  border-top: 2px solid transparent;
+  border-bottom: 1px solid transparent;
+  margin: 0;
+  min-height: 28px;
+}
+
+notebook.bluep-notebook > header > tabs > tab:hover {
+  background-color: rgba(69, 71, 90, 0.5);
+  color: #cdd6f4;
+}
+
+notebook.bluep-notebook > header > tabs > tab:checked {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+  border-top: 2px solid #89b4fa;
+}
+
+notebook.bluep-notebook > header > tabs > tab:checked:hover {
+  background-color: #1e1e2e;
+}
+
+notebook.bluep-notebook > header > tabs {
+  border-bottom: none;
+  background-color: transparent;
+}
+
+notebook.bluep-notebook > header > tabs > tab > widget {
+  padding: 0;
+  margin: 0;
+}
+
+notebook.bluep-notebook > header > tabs > tab button {
+  padding: 0;
+  margin: 0;
+  min-width: 16px;
+  min-height: 16px;
+  border-radius: 4px;
+  background-color: transparent;
+}
+
+notebook.bluep-notebook > header > tabs > tab button:hover {
+  background-color: #585b70;
+}
+
+/* Menu */
+popover.background {
+  background-color: #313244;
+  color: #cdd6f4;
+}
+
+popover.background list row {
+  padding: 4px 12px;
+}
+
+/* Dialog */
+window.bluep-dialog {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+}
+
+window.bluep-dialog headerbar {
+  background-color: #181825;
+}
