@@ -45,6 +45,7 @@ class CodePad(Gtk.Box):
         self._history: list[str] = []
         self._history_index: int = -1
         self._multiline_buffer: list[str] = []
+        self._max_output_lines = 500
 
         # Output area (top)
         self._output = Gtk.TextView.new()
@@ -120,6 +121,12 @@ class CodePad(Gtk.Box):
                 keycode: int, state: Gdk.ModifierType) -> bool:
         """Handle key press in the input area."""
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+
+        if ctrl and keyval == Gdk.KEY_l:
+            self.clear()
+            self._write_output("(cleared)\n", "info")
+            return True
 
         if keyval == Gdk.KEY_Return or keyval == Gdk.KEY_KP_Enter:
             if shift:
@@ -180,10 +187,13 @@ class CodePad(Gtk.Box):
         self._history.append(text)
         self._history_index = -1
 
-        # Clear input
         buffer.set_text("")
 
-        # Try to evaluate first (expression)
+        import inspect as _inspect
+
+        ns_before = set(self.executor.namespace.keys())
+        bench_before = set(self.executor.bench.keys()) if self.executor.bench else set()
+
         result = self.executor.evaluate_expression(full_input)
         if result.success:
             value_str = repr(result.value) if result.value is not None else "None"
@@ -191,7 +201,6 @@ class CodePad(Gtk.Box):
             self._write_output(f"{value_str}   ({type_name})\n", "output")
             self.emit("expression-evaluated", full_input, value_str, True)
         else:
-            # Try to exec (statement)
             exec_result = self.executor.execute_code(full_input)
             if exec_result.success:
                 if exec_result.output:
@@ -204,12 +213,34 @@ class CodePad(Gtk.Box):
             else:
                 error_msg = exec_result.error
                 if exec_result.traceback_str:
-                    # Show just the last line of traceback
                     lines = exec_result.traceback_str.strip().splitlines()
                     if lines:
                         error_msg = lines[-1]
                 self._write_output(f"Error: {error_msg}\n", "error")
                 self.emit("expression-evaluated", full_input, error_msg, False)
+
+        ns_after = set(self.executor.namespace.keys())
+
+        for new_name in ns_after - ns_before:
+            if new_name.startswith("_"):
+                continue
+            val = self.executor.namespace.get(new_name)
+            if val is None or _inspect.isclass(val) or _inspect.ismodule(val):
+                continue
+            if new_name not in self.executor.bench:
+                from bluep.core.executor import BenchObject
+                cls_name = type(val).__name__
+                self.executor.bench[new_name] = BenchObject(
+                    name=new_name, instance=val, class_name=cls_name
+                )
+                self.emit("object-created", new_name)
+
+        bench_after = set(self.executor.bench.keys()) if self.executor.bench else set()
+        for new_name in bench_after - bench_before:
+            if new_name not in (ns_after - ns_before):
+                self.emit("object-created", new_name)
+
+        self._trim_output()
 
     def _write_output(self, text: str, tag_name: str = "output") -> None:
         """Write text to the output area."""
@@ -220,9 +251,22 @@ class CodePad(Gtk.Box):
         end = buffer.get_end_iter()
         self._output.scroll_to_iter(end, 0.0, True, 0.5, 0.5)
 
+    def _trim_output(self) -> None:
+        """Cap output to _max_output_lines to prevent unbounded growth."""
+        buffer = self._output.get_buffer()
+        line_count = buffer.get_line_count()
+        if line_count > self._max_output_lines:
+            start = buffer.get_start_iter()
+            end = buffer.get_iter_at_line(line_count - self._max_output_lines)
+            buffer.delete(start, end)
+
     def clear(self) -> None:
         """Clear the output."""
         self._output.get_buffer().set_text("")
+
+    def update_executor(self, executor: CodeExecutor) -> None:
+        """Replace the executor reference (called when a new project is opened)."""
+        self.executor = executor
 
     def add_bench_object_var(self, name: str) -> None:
         """Make a bench object available in the code pad."""

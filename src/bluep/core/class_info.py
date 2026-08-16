@@ -31,11 +31,12 @@ class ClassKind(str, Enum):
 
 class RelationshipKind(str, Enum):
     """Relationship types shown in the class diagram."""
-    INHERITANCE = "inheritance"      # solid arrow with hollow triangle
-    IMPLEMENTATION = "implementation"  # dashed arrow with hollow triangle
-    COMPOSITION = "composition"      # solid with filled diamond (has-a, owns)
-    AGGREGATION = "aggregation"      # solid with hollow diamond (has-a, reference)
-    DEPENDENCY = "dependency"        # dashed arrow (uses)
+    INHERITANCE = "inheritance"
+    IMPLEMENTATION = "implementation"
+    COMPOSITION = "composition"
+    AGGREGATION = "aggregation"
+    ASSOCIATION = "association"
+    DEPENDENCY = "dependency"
 
 
 @dataclass
@@ -104,6 +105,7 @@ class ClassInfo:
     # Visual diagram state
     pos_x: float = 100.0
     pos_y: float = 100.0
+    collapsed: bool = False
 
     @property
     def is_compiled(self) -> bool:
@@ -144,6 +146,7 @@ class Relationship:
     target: str  # class name
     kind: RelationshipKind
     label: str = ""
+    source_field: str | None = None  # field that establishes this relationship (for composition)
 
 
 @dataclass
@@ -189,7 +192,7 @@ class ProjectModel:
                 typ = f.type_annotation or ""
                 for ref_cls in self.classes:
                     if ref_cls != cls.name and ref_cls in typ:
-                        rels.append(Relationship(cls.name, ref_cls, RelationshipKind.COMPOSITION))
+                        rels.append(Relationship(cls.name, ref_cls, RelationshipKind.COMPOSITION, source_field=f.name))
         # Deduplicate
         seen: set[tuple[str, str, str]] = set()
         unique: list[Relationship] = []

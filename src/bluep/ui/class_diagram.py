@@ -150,6 +150,7 @@ class ClassBox:
     LINE_HEIGHT = 16
     PADDING = 8
     SECTION_GAP = 4
+    COLLAPSE_AREA_W = 20
 
     def __init__(self, class_info: ClassInfo, x: float = 100, y: float = 100) -> None:
         self.class_info = class_info
@@ -170,11 +171,17 @@ class ClassBox:
         return self.class_info.kind
 
     @property
+    def collapsed(self) -> bool:
+        return self.class_info.collapsed
+
+    @property
     def width(self) -> float:
         return self.WIDTH
 
     @property
     def height(self) -> float:
+        if self.collapsed:
+            return self.HEADER_HEIGHT + self.PADDING
         fields_count = min(len(self.class_info.instance_fields), 8) + min(len(self.class_info.class_fields), 4)
         methods_count = min(len(self.class_info.public_methods), 10) + min(len(self.class_info.constructors), 2)
         return (self.HEADER_HEIGHT +
@@ -186,6 +193,14 @@ class ClassBox:
     def contains(self, px: float, py: float) -> bool:
         """Check if a point is inside this box."""
         return self.x <= px <= self.x + self.width and self.y <= py <= self.y + self.height
+
+    def is_collapse_hit(self, px: float, py: float) -> bool:
+        """Check if a click is in the collapse toggle area (left side of header)."""
+        return (self.x <= px <= self.x + self.COLLAPSE_AREA_W
+                and self.y <= py <= self.y + self.HEADER_HEIGHT)
+
+    def toggle_collapse(self) -> None:
+        self.class_info.collapsed = not self.class_info.collapsed
 
     def start_drag(self, px: float, py: float) -> None:
         self.dragging = True
@@ -214,6 +229,17 @@ class ClassBox:
 
     def get_right_center(self) -> tuple[float, float]:
         return (self.x + self.width, self.y + self.height / 2)
+
+    def get_field_y(self, field_name: str) -> float | None:
+        """Return the Y center of a field's render row, or None if not visible."""
+        if self.collapsed:
+            return None
+        visible = self.class_info.class_fields[:4] + self.class_info.instance_fields[:8]
+        base = self.y + self.HEADER_HEIGHT + self.PADDING
+        for i, f in enumerate(visible):
+            if f.name == field_name:
+                return base + i * self.LINE_HEIGHT + self.LINE_HEIGHT / 2
+        return None
 
     def render(self, snapshot: Gtk.Snapshot, create_layout: Callable) -> None:
         """Render this class box using the GTK4 snapshot API."""
@@ -276,10 +302,16 @@ class ClassBox:
         snapshot.append_color(_rgba(COLORS["header_bg"]), _rect(x, y, w, self.HEADER_HEIGHT))
         snapshot.pop()
 
-        # Header text - class name (centered)
+        # Header text - class name (centered, shifted right to avoid collapse toggle)
         _draw_centered_text(snapshot, create_layout, self.class_info.name,
-                            x + w / 2, y + self.HEADER_HEIGHT / 2,
+                            x + w / 2 + self.COLLAPSE_AREA_W / 2, y + self.HEADER_HEIGHT / 2,
                             "Sans Bold 13", _rgba(COLORS["text"]))
+
+        # Collapse toggle (+/-) in the left side of the header
+        toggle_text = "\u25bc" if not self.collapsed else "\u25b6"
+        _draw_text(snapshot, create_layout, toggle_text,
+                    x + 6, y + self.HEADER_HEIGHT / 2 - 7,
+                    "Sans 10", _rgba(COLORS["text_dim"]))
 
         # Kind label
         kind_labels = {
@@ -294,7 +326,7 @@ class ClassBox:
             layout.set_text(kind_text)
             layout.set_font_description(Pango.FontDescription.from_string("Sans Italic 9"))
             _ink, logical = layout.get_pixel_extents()
-            kx = x + (w - logical.width) / 2
+            kx = x + (w - logical.width) / 2 + self.COLLAPSE_AREA_W / 2
             ky = y + self.HEADER_HEIGHT - 4 - logical.height
             snapshot.save()
             snapshot.translate(_point(kx, ky))
@@ -305,6 +337,9 @@ class ClassBox:
         snapshot.append_color(_rgba(COLORS["box_border"], 0.5),
                               _rect(x, y + self.HEADER_HEIGHT, w, 1))
 
+        if self.collapsed:
+            return
+
         # Fields section
         y_cursor = y + self.HEADER_HEIGHT + self.PADDING
 
@@ -312,7 +347,9 @@ class ClassBox:
         for field in self.class_info.class_fields[:4]:
             prefix = "$ " if not field.is_private else "- "
             text = f"{prefix}{field.name}"
-            _draw_text(snapshot, create_layout, text[:24],
+            if field.type_annotation:
+                text += f" : {field.type_annotation}"
+            _draw_text(snapshot, create_layout, text[:28],
                        x + self.PADDING, y_cursor, "Monospace 11",
                        _rgba(COLORS["text_dim"]))
             y_cursor += self.LINE_HEIGHT
@@ -391,6 +428,7 @@ class ClassDiagram(Gtk.DrawingArea):
         "class-right-clicked": (GObject.SignalFlags.RUN_FIRST, None, (str, float, float)),
         "diagram-right-clicked": (GObject.SignalFlags.RUN_FIRST, None, (float, float)),
         "class-moved": (GObject.SignalFlags.RUN_FIRST, None, (str, float, float)),
+        "class-collapsed": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
     }
 
     def __init__(self, model: ProjectModel) -> None:
@@ -405,6 +443,8 @@ class ClassDiagram(Gtk.DrawingArea):
         self._scroll_x = 0.0
         self._scroll_y = 0.0
         self._zoom = 1.0
+        self._mouse_x = 0.0
+        self._mouse_y = 0.0
 
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -429,7 +469,7 @@ class ClassDiagram(Gtk.DrawingArea):
         ev_motion.connect("leave", self._on_leave)
         self.add_controller(ev_motion)
 
-        ev_scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        ev_scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
         ev_scroll.connect("scroll", self._on_scroll)
         self.add_controller(ev_scroll)
 
@@ -440,22 +480,36 @@ class ClassDiagram(Gtk.DrawingArea):
         w = self.get_width()
         h = self.get_height()
 
-        # Background
         snapshot.append_color(_rgba(COLORS["bg"]), _rect(0, 0, w, h))
 
-        # Grid pattern (subtle dots)
         dot_color = _rgba((0.3, 0.31, 0.41), 0.15)
         for gx in range(0, w, 20):
             for gy in range(0, h, 20):
                 snapshot.append_color(dot_color, _rect(gx - 0.5, gy - 0.5, 1.5, 1.5))
 
-        # Draw relationships first (behind boxes)
+        snapshot.save()
+        snapshot.translate(_point(-self._scroll_x * self._zoom, -self._scroll_y * self._zoom))
+        snapshot.scale(self._zoom, self._zoom)
+
         for rel in self.model.relationships:
             self._render_relationship(snapshot, rel)
 
-        # Draw boxes
         for box in self._boxes.values():
             box.render(snapshot, self.create_pango_layout)
+
+        snapshot.restore()
+
+        if abs(self._zoom - 1.0) > 0.01 or self._scroll_x != 0 or self._scroll_y != 0:
+            label = f"{int(self._zoom * 100)}%"
+            layout = self.create_pango_layout(label)
+            layout.set_font_description(Pango.FontDescription.from_string("11"))
+            _ink, logical = layout.get_pixel_extents()
+            lx = logical.width
+            ly = logical.height
+            px = w - lx - 12
+            py = h - ly - 8
+            snapshot.append_color(_rgba((0.09, 0.09, 0.145), 0.85), _rect(px - 4, py - 2, lx + 8, ly + 4))
+            snapshot.append_layout(layout, _rgba(COLORS["text"]), _point(px, py))
 
     def _update_boxes(self) -> None:
         """Sync ClassBox objects with the model."""
@@ -491,6 +545,13 @@ class ClassDiagram(Gtk.DrawingArea):
     def refresh(self) -> None:
         """Refresh the diagram after model changes."""
         self._update_boxes()
+        self.queue_draw()
+
+    def reset_view(self) -> None:
+        """Reset zoom and pan to defaults."""
+        self._zoom = 1.0
+        self._scroll_x = 0.0
+        self._scroll_y = 0.0
         self.queue_draw()
 
     def _find_free_position(self, occupied: list[tuple[float, float, float, float]],
@@ -549,11 +610,23 @@ class ClassDiagram(Gtk.DrawingArea):
         src = self._boxes[rel.source]
         tgt = self._boxes[rel.target]
 
-        # Find best connection points
-        sx, sy = self._get_connection_point(src, tgt.x + tgt.width / 2, tgt.y + tgt.height / 2)
-        tx, ty = self._get_connection_point(tgt, src.x + src.width / 2, src.y + src.height / 2)
+        if rel.source_field and not src.collapsed:
+            field_y = src.get_field_y(rel.source_field)
+            if field_y is not None:
+                tgt_cx = tgt.x + tgt.width / 2
+                if tgt_cx < src.x + src.width / 2:
+                    sx = src.x
+                else:
+                    sx = src.x + src.width
+                sy = field_y
+                tx, ty = self._get_connection_point(tgt, sx, sy)
+            else:
+                sx, sy = self._get_connection_point(src, tgt.x + tgt.width / 2, tgt.y + tgt.height / 2)
+                tx, ty = self._get_connection_point(tgt, sx, sy)
+        else:
+            sx, sy = self._get_connection_point(src, tgt.x + tgt.width / 2, tgt.y + tgt.height / 2)
+            tx, ty = self._get_connection_point(tgt, src.x + src.width / 2, src.y + src.height / 2)
 
-        # Set line style based on relationship kind
         if rel.kind == RelationshipKind.INHERITANCE:
             line_color = _rgba(COLORS["blue"])
             dash: list[float] | None = None
@@ -566,87 +639,95 @@ class ClassDiagram(Gtk.DrawingArea):
         elif rel.kind == RelationshipKind.AGGREGATION:
             line_color = _rgba(COLORS["mauve"])
             dash = None
+        elif rel.kind == RelationshipKind.ASSOCIATION:
+            line_color = _rgba(COLORS["text"])
+            dash = None
         else:
             line_color = _rgba(COLORS["text_dim"])
             dash = [4, 4]
 
-        # Draw line
-        _draw_line(snapshot, sx, sy, tx, ty, 1.5, line_color, dash)
-
-        # Draw arrow head
-        angle = math.atan2(ty - sy, tx - sx)
         arrow_len = 12
         arrow_angle = math.pi / 6
+        angle = math.atan2(ty - sy, tx - sx)
 
         if rel.kind in (RelationshipKind.INHERITANCE, RelationshipKind.IMPLEMENTATION):
-            # Hollow triangle (inheritance/implementation)
-            x1 = tx - arrow_len * math.cos(angle - arrow_angle)
-            y1 = ty - arrow_len * math.sin(angle - arrow_angle)
-            x2 = tx - arrow_len * math.cos(angle + arrow_angle)
-            y2 = ty - arrow_len * math.sin(angle + arrow_angle)
+            tip_back = arrow_len
+            bx = tx - tip_back * math.cos(angle)
+            by = ty - tip_back * math.sin(angle)
+            x1 = bx + (arrow_len / 2) * math.cos(angle + math.pi / 2 - arrow_angle)
+            y1 = by + (arrow_len / 2) * math.sin(angle + math.pi / 2 - arrow_angle)
+            x2 = bx + (arrow_len / 2) * math.cos(angle - math.pi / 2 + arrow_angle)
+            y2 = by + (arrow_len / 2) * math.sin(angle - math.pi / 2 + arrow_angle)
+
+            line_end_x = bx
+            line_end_y = by
+            _draw_line(snapshot, sx, sy, line_end_x, line_end_y, 1.5, line_color, dash)
 
             pb = Gsk.PathBuilder()
             pb.move_to(tx, ty)
             pb.line_to(x1, y1)
             pb.line_to(x2, y2)
-            # Fill with background (hollow)
+            pb.close()
             _fill_path(snapshot, pb, _rgba(COLORS["bg"]))
-            # Stroke with line color
             pb2 = Gsk.PathBuilder()
             pb2.move_to(tx, ty)
             pb2.line_to(x1, y1)
             pb2.line_to(x2, y2)
-            _stroke_path(snapshot, pb2, line_color, 1.0)
+            pb2.close()
+            _stroke_path(snapshot, pb2, line_color, 1.5)
 
-        elif rel.kind == RelationshipKind.COMPOSITION:
-            # Filled diamond
-            dx = arrow_len * math.cos(angle)
-            dy = arrow_len * math.sin(angle)
-            px = tx - dx
-            py = ty - dy
-            half_w = 5
-            perp_x = -math.sin(angle) * half_w
-            perp_y = math.cos(angle) * half_w
+        elif rel.kind in (RelationshipKind.COMPOSITION, RelationshipKind.AGGREGATION):
+            diamond_len = 14
+            diamond_w = 6
+            sx2 = sx + diamond_len * math.cos(angle)
+            sy2 = sy + diamond_len * math.sin(angle)
+            perp_x = -math.sin(angle) * diamond_w
+            perp_y = math.cos(angle) * diamond_w
+            mid_x = (sx + sx2) / 2
+            mid_y = (sy + sy2) / 2
 
-            pb = Gsk.PathBuilder()
-            pb.move_to(tx, ty)
-            pb.line_to(px + perp_x, py + perp_y)
-            pb.line_to(px, py)
-            pb.line_to(px - perp_x, py - perp_y)
-            _fill_path(snapshot, pb, _rgba(COLORS["mauve"]))
-
-        elif rel.kind == RelationshipKind.AGGREGATION:
-            # Hollow diamond
-            dx = arrow_len * math.cos(angle)
-            dy = arrow_len * math.sin(angle)
-            px = tx - dx
-            py = ty - dy
-            half_w = 5
-            perp_x = -math.sin(angle) * half_w
-            perp_y = math.cos(angle) * half_w
+            _draw_line(snapshot, sx2, sy2, tx, ty, 1.5, line_color, dash)
 
             pb = Gsk.PathBuilder()
-            pb.move_to(tx, ty)
-            pb.line_to(px + perp_x, py + perp_y)
-            pb.line_to(px, py)
-            pb.line_to(px - perp_x, py - perp_y)
-            # Fill with background (hollow)
-            _fill_path(snapshot, pb, _rgba(COLORS["bg"]))
-            # Stroke
-            pb2 = Gsk.PathBuilder()
-            pb2.move_to(tx, ty)
-            pb2.line_to(px + perp_x, py + perp_y)
-            pb2.line_to(px, py)
-            pb2.line_to(px - perp_x, py - perp_y)
-            _stroke_path(snapshot, pb2, _rgba(COLORS["mauve"]), 1.0)
+            pb.move_to(sx, sy)
+            pb.line_to(mid_x + perp_x, mid_y + perp_y)
+            pb.line_to(sx2, sy2)
+            pb.line_to(mid_x - perp_x, mid_y - perp_y)
+            pb.close()
+            if rel.kind == RelationshipKind.COMPOSITION:
+                _fill_path(snapshot, pb, _rgba(COLORS["mauve"]))
+                pb2 = Gsk.PathBuilder()
+                pb2.move_to(sx, sy)
+                pb2.line_to(mid_x + perp_x, mid_y + perp_y)
+                pb2.line_to(sx2, sy2)
+                pb2.line_to(mid_x - perp_x, mid_y - perp_y)
+                pb2.close()
+                _stroke_path(snapshot, pb2, _rgba(COLORS["mauve"]), 1.0)
+            else:
+                _fill_path(snapshot, pb, _rgba(COLORS["bg"]))
+                pb2 = Gsk.PathBuilder()
+                pb2.move_to(sx, sy)
+                pb2.line_to(mid_x + perp_x, mid_y + perp_y)
+                pb2.line_to(sx2, sy2)
+                pb2.line_to(mid_x - perp_x, mid_y - perp_y)
+                pb2.close()
+                _stroke_path(snapshot, pb2, _rgba(COLORS["mauve"]), 1.0)
 
-        else:
-            # Simple arrow (dependency)
+        elif rel.kind == RelationshipKind.ASSOCIATION:
             x1 = tx - arrow_len * math.cos(angle - arrow_angle)
             y1 = ty - arrow_len * math.sin(angle - arrow_angle)
             x2 = tx - arrow_len * math.cos(angle + arrow_angle)
             y2 = ty - arrow_len * math.sin(angle + arrow_angle)
+            _draw_line(snapshot, sx, sy, tx, ty, 1.5, line_color, dash)
+            _draw_line(snapshot, tx, ty, x1, y1, 1.5, line_color)
+            _draw_line(snapshot, tx, ty, x2, y2, 1.5, line_color)
 
+        else:
+            x1 = tx - arrow_len * math.cos(angle - arrow_angle)
+            y1 = ty - arrow_len * math.sin(angle - arrow_angle)
+            x2 = tx - arrow_len * math.cos(angle + arrow_angle)
+            y2 = ty - arrow_len * math.sin(angle + arrow_angle)
+            _draw_line(snapshot, sx, sy, tx, ty, 1.5, line_color, dash)
             _draw_line(snapshot, tx, ty, x1, y1, 1.0, line_color)
             _draw_line(snapshot, tx, ty, x2, y2, 1.0, line_color)
 
@@ -680,8 +761,8 @@ class ClassDiagram(Gtk.DrawingArea):
                 return box.get_top_center()
 
     def _get_widget_coords(self, x: float, y: float) -> tuple[float, float]:
-        """Convert widget coordinates to diagram coordinates (accounting for scroll)."""
-        return (x + self._scroll_x, y + self._scroll_y)
+        """Convert widget coordinates to diagram coordinates (accounting for zoom and scroll)."""
+        return (x / self._zoom + self._scroll_x, y / self._zoom + self._scroll_y)
 
     def _find_box_at(self, x: float, y: float) -> ClassBox | None:
         """Find the class box at the given coordinates."""
@@ -700,19 +781,22 @@ class ClassDiagram(Gtk.DrawingArea):
         box = self._find_box_at(dx, dy)
 
         if box:
-            # Select the box
+            if box.is_collapse_hit(dx, dy):
+                box.toggle_collapse()
+                self.emit("class-collapsed", box.name, box.collapsed)
+                self.queue_draw()
+                return
+
             if self._selected:
                 self._selected.selected = False
             self._selected = box
             box.selected = True
             self.emit("class-selected", box.name)
 
-            # Start dragging
             box.start_drag(dx, dy)
             self._dragging = box
             self._drag_started = False
 
-            # Double click
             if n_press == 2:
                 self.emit("class-double-clicked", box.name)
         else:
@@ -763,6 +847,8 @@ class ClassDiagram(Gtk.DrawingArea):
 
     def _on_motion(self, controller: Gtk.EventControllerMotion, x: float, y: float) -> None:
         """Handle mouse motion for hover effects."""
+        self._mouse_x = x
+        self._mouse_y = y
         dx, dy = self._get_widget_coords(x, y)
         box = self._find_box_at(dx, dy)
 
@@ -786,6 +872,20 @@ class ClassDiagram(Gtk.DrawingArea):
             self.queue_draw()
 
     def _on_scroll(self, controller: Gtk.EventControllerScroll, dx: float, dy: float) -> None:
-        """Handle scroll for zoom."""
-        # Could implement zoom here
-        pass
+        """Handle scroll: Ctrl+scroll to zoom, plain scroll to pan."""
+        modifiers = controller.get_current_event_state()
+        if modifiers & Gdk.ModifierType.CONTROL_MASK:
+            old_zoom = self._zoom
+            factor = 1.0 - dy * 0.1
+            new_zoom = max(0.25, min(4.0, old_zoom * factor))
+            if new_zoom == old_zoom:
+                return
+            diag_x = self._mouse_x / old_zoom + self._scroll_x
+            diag_y = self._mouse_y / old_zoom + self._scroll_y
+            self._zoom = new_zoom
+            self._scroll_x = diag_x - self._mouse_x / new_zoom
+            self._scroll_y = diag_y - self._mouse_y / new_zoom
+        else:
+            self._scroll_x += dx * 30
+            self._scroll_y += dy * 30
+        self.queue_draw()

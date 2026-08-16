@@ -235,6 +235,7 @@ class CodeExecutor:
 
         Mirrors BlueJ's 'Instantiate object' action.
         If name is provided, uses it instead of auto-generating one.
+        Raises ValueError if the resolved name already exists on the bench.
         """
         if class_name not in self.namespace:
             raise NameError(f"Class '{class_name}' not found. Compile it first.")
@@ -246,6 +247,8 @@ class CodeExecutor:
         instance = cls(*args, **kwargs)
         if name:
             bench_name = name
+            if bench_name in self.bench:
+                raise ValueError(f"Object name '{bench_name}' already exists on the bench")
             count = self._bench_counter.get(class_name, 0) + 1
             self._bench_counter[class_name] = count
         else:
@@ -257,11 +260,16 @@ class CodeExecutor:
         return bench_obj
 
     def _generate_bench_name(self, class_name: str) -> str:
-        """Generate a unique name for a bench object (e.g., obj1, obj2)."""
-        count = self._bench_counter.get(class_name, 0) + 1
-        self._bench_counter[class_name] = count
-        # BlueJ uses lowercase first letter
+        """Generate a unique name for a bench object (e.g., obj1, obj2).
+
+        Skips names already on the bench so auto-generated names never collide
+        with existing objects (including user-named ones).
+        """
         base = class_name[0].lower() + class_name[1:] if class_name else "obj"
+        count = self._bench_counter.get(class_name, 0) + 1
+        while f"{base}{count}" in self.bench:
+            count += 1
+        self._bench_counter[class_name] = count
         return f"{base}{count}"
 
     def remove_bench_object(self, name: str) -> None:

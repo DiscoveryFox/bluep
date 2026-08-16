@@ -300,6 +300,19 @@ class BluePDebugger(bdb.Bdb):
             self.state.is_running = False
             self.state.is_paused = False
 
+    def run_call(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
+        """Run a function call under the debugger. Blocks until done.
+
+        Use from a background thread — _pause_at_frame blocks on _stop_event.
+        """
+        self.state.is_running = True
+        self._step_action = "continue"
+        try:
+            return self.runcall(func, *args, **kwargs)
+        finally:
+            self.state.is_running = False
+            self.state.is_paused = False
+
     def get_variable_value(self, name: str) -> Any | None:
         """Get a variable's value from the current frame."""
         if self._frame is None:

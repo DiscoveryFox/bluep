@@ -244,7 +244,7 @@ class Project:
     def _write_diagram(self) -> None:
         data = {
             "classes": {
-                name: {"x": ci.pos_x, "y": ci.pos_y}
+                name: {"x": ci.pos_x, "y": ci.pos_y, "collapsed": ci.collapsed}
                 for name, ci in self.model.classes.items()
             }
         }
@@ -264,6 +264,7 @@ class Project:
                     y = pos.get("y", 100.0)
                     self.model.classes[name].pos_x = x
                     self.model.classes[name].pos_y = y
+                    self.model.classes[name].collapsed = bool(pos.get("collapsed", False))
                     if x != 100.0 or y != 100.0:
                         any_explicit = True
             self.model.positions_loaded = any_explicit

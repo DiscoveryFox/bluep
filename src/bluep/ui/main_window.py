@@ -15,8 +15,10 @@ below, and a tabbed bottom panel for terminal/code pad/debugger/AI.
 
 from __future__ import annotations
 
+import inspect
 import io
 import sys
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,7 +36,7 @@ from bluep.core.debugger import BluePDebugger, DebugState
 from bluep.core.ai_agent import AIAgent
 
 from bluep.ui.class_diagram import ClassDiagram
-from bluep.ui.code_editor import CodeEditor
+from bluep.ui.code_editor import CodeEditor, HAS_GTKSOURCE
 from bluep.ui.object_bench import ObjectBench
 from bluep.ui.code_pad import CodePad
 from bluep.ui.terminal import Terminal
@@ -48,6 +50,7 @@ from bluep.ui.dialogs import (
     PreferencesDialog,
     RenameClassDialog,
 )
+from bluep.ui.class_editor import ClassEditorDialog
 
 
 class MainWindow(Gtk.ApplicationWindow):
@@ -85,6 +88,14 @@ class MainWindow(Gtk.ApplicationWindow):
 
         # Set up debugger callbacks
         self.debugger.set_pause_callback(self._on_debugger_pause)
+
+        if not HAS_GTKSOURCE:
+            self.terminal.write_error(
+                "WARNING: GtkSourceView 5 is not available. "
+                "The code editor is running in fallback mode (plain Gtk.TextView) - "
+                "syntax highlighting, line numbers, and auto-indent are limited. "
+                "Install gtksourceview5 for full editor features."
+            )
 
         # AI agent is created when a project is opened (see open_project)
 
@@ -128,6 +139,11 @@ class MainWindow(Gtk.ApplicationWindow):
         menu.append("Show AI Panel", "win.show-ai")
         menu.append("Toggle Bottom Panel", "win.toggle-bottom-panel")
         menu.append_section(None, Gio.Menu.new())
+        menu.append("Hide Code Editor", "win.hide-editor")
+        menu.append("Hide Terminal", "win.hide-terminal")
+        menu.append("Hide Debugger", "win.hide-debugger")
+        menu.append("Hide AI Panel", "win.hide-ai")
+        menu.append_section(None, Gio.Menu.new())
         menu.append("Preferences", "win.preferences")
         menu.append("About", "win.about")
 
@@ -140,12 +156,25 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _build_main_layout(self) -> None:
         """Build the main window layout."""
-        main_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        main_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
         self.set_child(main_box)
 
+        # --- Left edge: editor restore button (hidden by default) ---
+        self._editor_restore_btn = Gtk.Button.new_from_icon_name("go-next")
+        self._editor_restore_btn.set_tooltip_text("Show Code Editor")
+        self._editor_restore_btn.add_css_class("bluep-editor-restore")
+        self._editor_restore_btn.connect("clicked", lambda b: self._show_editor())
+        self._editor_restore_btn.set_visible(False)
+        main_box.append(self._editor_restore_btn)
+
+        content_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        content_box.set_hexpand(True)
+        self._content_box = content_box
+        main_box.append(content_box)
+
         # --- Top section: class diagram + editor (side by side) ---
-        top_paned = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
-        top_paned.set_vexpand(True)
+        self._top_paned = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        self._top_paned.set_vexpand(True)
 
         # Class diagram (left)
         diagram_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
@@ -165,40 +194,34 @@ class MainWindow(Gtk.ApplicationWindow):
         self._diagram_container.append(placeholder)
         diagram_box.append(self._diagram_container)
 
-        top_paned.set_start_child(diagram_box)
-        top_paned.set_shrink_start_child(False)
-        top_paned.set_position(600)
+        self._top_paned.set_start_child(diagram_box)
+        self._top_paned.set_shrink_start_child(False)
+        self._top_paned.set_position(600)
 
         # Code editor (right)
-        editor_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._editor_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
         editor_label = Gtk.Label.new("Code Editor")
         editor_label.add_css_class("bluep-status-bar")
         editor_label.set_halign(Gtk.Align.START)
         editor_label.set_margin_start(8)
-        editor_box.append(editor_label)
+        self._editor_box.append(editor_label)
 
         self._editor_notebook = Gtk.Notebook.new()
         self._editor_notebook.add_css_class("bluep-notebook")
         self._editor_notebook.set_vexpand(True)
         self._editor_notebook.set_scrollable(True)
 
-        # Welcome tab
-        welcome = Gtk.Label.new("Double-click a class in the diagram to open its editor.")
-        welcome.set_vexpand(True)
-        welcome.set_valign(Gtk.Align.CENTER)
-        welcome.set_margin_top(40)
-        welcome.set_margin_bottom(40)
-        welcome.add_css_class("bluep-status-bar")
-        self._editor_notebook.append_page(welcome, Gtk.Label.new("Welcome"))
+        self._welcome_page = self._build_welcome_page()
+        self._editor_notebook.append_page(self._welcome_page, self._build_welcome_tab())
 
-        editor_box.append(self._editor_notebook)
+        self._editor_box.append(self._editor_notebook)
 
-        top_paned.set_end_child(editor_box)
-        top_paned.set_shrink_end_child(False)
+        self._top_paned.set_end_child(self._editor_box)
+        self._top_paned.set_shrink_end_child(False)
 
         # --- Upper section: diagram+editor + object bench ---
         upper_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
-        upper_box.append(top_paned)
+        upper_box.append(self._top_paned)
 
         bench_separator = Gtk.Separator.new(Gtk.Orientation.HORIZONTAL)
         upper_box.append(bench_separator)
@@ -261,7 +284,151 @@ class MainWindow(Gtk.ApplicationWindow):
         self._main_paned.set_shrink_end_child(False)
         self._main_paned.set_position(400)
 
-        main_box.append(self._main_paned)
+        content_box.append(self._main_paned)
+
+    def _build_welcome_page(self) -> Gtk.Widget:
+        """Build the Welcome tab with useful information."""
+        scrolled = Gtk.ScrolledWindow.new()
+        scrolled.set_vexpand(True)
+        scrolled.set_hexpand(True)
+
+        outer = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        outer.set_margin_top(32)
+        outer.set_margin_bottom(32)
+        outer.set_margin_start(48)
+        outer.set_margin_end(48)
+
+        title = Gtk.Label.new("BlueP")
+        title.add_css_class("bluep-welcome-title")
+        title.set_halign(Gtk.Align.START)
+        outer.append(title)
+
+        subtitle = Gtk.Label.new("A BlueJ-style IDE for Python")
+        subtitle.add_css_class("bluep-welcome-subtitle")
+        subtitle.set_halign(Gtk.Align.START)
+        subtitle.set_margin_bottom(24)
+        outer.append(subtitle)
+
+        editor_desc = Gtk.Label.new(
+            "The BlueP code editor is a syntax-highlighted Python editor built on "
+            "GtkSourceView 5 (with a plain Gtk.TextView fallback when GtkSourceView "
+            "is unavailable)."
+        )
+        editor_desc.set_halign(Gtk.Align.START)
+        editor_desc.set_wrap(True)
+        editor_desc.set_margin_bottom(20)
+        outer.append(editor_desc)
+
+        features_header = Gtk.Label.new("Features")
+        features_header.add_css_class("bluep-welcome-section")
+        features_header.set_halign(Gtk.Align.START)
+        features_header.set_margin_bottom(8)
+        outer.append(features_header)
+
+        for text in [
+            "Visual class diagram - create, move, and inspect classes",
+            "Code editor with Python syntax highlighting and autocomplete",
+            "Object bench - instantiate classes and call methods interactively",
+            "Integrated terminal for program output",
+            "Code Pad for quick expression evaluation",
+            "Step debugger with breakpoints and variable inspection",
+            "AI assistant panel (requires API key)",
+        ]:
+            row = Gtk.Label.new(f"  • {text}")
+            row.set_halign(Gtk.Align.START)
+            row.set_margin_bottom(4)
+            outer.append(row)
+
+        shortcuts_header = Gtk.Label.new("Keyboard Shortcuts")
+        shortcuts_header.add_css_class("bluep-welcome-section")
+        shortcuts_header.set_halign(Gtk.Align.START)
+        shortcuts_header.set_margin_top(16)
+        shortcuts_header.set_margin_bottom(8)
+        outer.append(shortcuts_header)
+
+        shortcuts = [
+            ("Ctrl+N", "New class"),
+            ("Ctrl+O", "Open project"),
+            ("Ctrl+S", "Save project"),
+            ("Ctrl+Shift+C", "Compile all"),
+            ("Ctrl+T", "Show terminal"),
+            ("Ctrl+E", "Show Code Pad"),
+            ("Ctrl+D", "Show debugger"),
+        ]
+        for key, desc in shortcuts:
+            row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
+            row.set_margin_bottom(4)
+            key_label = Gtk.Label.new(key)
+            key_label.add_css_class("bluep-welcome-key")
+            key_label.set_xalign(0)
+            key_label.set_size_request(120, -1)
+            desc_label = Gtk.Label.new(desc)
+            desc_label.set_halign(Gtk.Align.START)
+            row.append(key_label)
+            row.append(desc_label)
+            outer.append(row)
+
+        getting_started = Gtk.Label.new("Getting Started")
+        getting_started.add_css_class("bluep-welcome-section")
+        getting_started.set_halign(Gtk.Align.START)
+        getting_started.set_margin_top(16)
+        getting_started.set_margin_bottom(8)
+        outer.append(getting_started)
+
+        for text in [
+            "1. Click the menu button (top-right) and choose New Project or Open Project",
+            "2. Click New Class in the toolbar to create a Python class",
+            "3. Double-click a class in the diagram to open its editor",
+            "4. Right-click a class to instantiate it on the object bench",
+            "5. Right-click an object on the bench to call its methods",
+        ]:
+            row = Gtk.Label.new(text)
+            row.set_halign(Gtk.Align.START)
+            row.set_margin_bottom(4)
+            outer.append(row)
+
+        if not HAS_GTKSOURCE:
+            warning_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+            warning_box.add_css_class("bluep-welcome-warning")
+            warning_box.set_margin_top(20)
+            warning_icon = Gtk.Label.new("⚠")
+            warning_text = Gtk.Label.new(
+                "GtkSourceView 5 is not installed. The editor is running in "
+                "fallback mode - syntax highlighting and line numbers are "
+                "disabled. Install gtksourceview5 for full features."
+            )
+            warning_text.set_wrap(True)
+            warning_text.set_hexpand(True)
+            warning_box.append(warning_icon)
+            warning_box.append(warning_text)
+            outer.append(warning_box)
+
+        scrolled.set_child(outer)
+        return scrolled
+
+    def _build_welcome_tab(self) -> Gtk.Widget:
+        tab_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
+        tab_label = Gtk.Label.new("Welcome")
+        tab_box.append(tab_label)
+        btn_close = Gtk.Button.new_from_icon_name("window-close")
+        btn_close.set_has_frame(False)
+        btn_close.set_size_request(20, 20)
+        btn_close.connect("clicked", lambda b: self._dismiss_welcome())
+        tab_box.append(btn_close)
+        return tab_box
+
+    def _dismiss_welcome(self) -> None:
+        page_num = self._editor_notebook.page_num(self._welcome_page)
+        if page_num >= 0:
+            self._editor_notebook.remove_page(page_num)
+
+    def _hide_editor(self) -> None:
+        self._editor_box.set_visible(False)
+        self._editor_restore_btn.set_visible(True)
+
+    def _show_editor(self) -> None:
+        self._editor_box.set_visible(True)
+        self._editor_restore_btn.set_visible(False)
 
     def _build_status_bar(self) -> None:
         """Build the bottom status bar."""
@@ -281,12 +448,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._compile_status.set_margin_end(8)
         status_bar.append(self._compile_status)
 
-        # The status bar needs to be added after main_box, but since we built
-        # main_box in _build_main_layout, we need to append to self
-        # Actually, we need to add it to main_box
-        child = self.get_child()
-        if child and isinstance(child, Gtk.Box):
-            child.append(status_bar)
+        self._content_box.append(status_bar)
 
     # --- Actions ---
 
@@ -304,6 +466,11 @@ class MainWindow(Gtk.ApplicationWindow):
             "show-debugger": (self._action_show_debugger, None),
             "show-ai": (self._action_show_ai, None),
             "toggle-bottom-panel": (self._action_toggle_bottom_panel, None),
+            "hide-editor": (self._hide_editor, None),
+            "hide-terminal": (lambda: self._hide_bottom_tab("Terminal"), None),
+            "hide-debugger": (lambda: self._hide_bottom_tab("Debugger"), None),
+            "hide-ai": (lambda: self._hide_bottom_tab("AI"), None),
+            "reset-view": (self._action_reset_view, None),
             "preferences": (self._action_preferences, None),
             "about": (self._action_about, None),
         }
@@ -322,6 +489,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "<Ctrl>t": "win.show-terminal",
             "<Ctrl>e": "win.show-code-pad",
             "<Ctrl>d": "win.show-debugger",
+            "<Ctrl>i": "win.show-ai",
             "<Ctrl>o": "win.open-project",
         }
 
@@ -392,15 +560,48 @@ class MainWindow(Gtk.ApplicationWindow):
         self._set_status(f"Project saved: {self.project.name}")
 
     def _action_new_class(self) -> None:
-        """Create a new class."""
+        """Create a new class using the graphical class editor."""
         if not self.project:
             self._set_status("Open or create a project first")
             return
 
-        def on_create(name: str, kind: ClassKind) -> None:
-            self._create_class(name, kind)
+        def on_save(name: str, code: str) -> None:
+            self._create_class_from_editor(name, code)
 
-        dialog = NewClassDialog(parent=self, on_create=on_create)
+        dialog = ClassEditorDialog(parent=self, class_info=None, on_save=on_save)
+        dialog.show()
+
+    def _create_class_from_editor(self, name: str, code: str) -> None:
+        """Create a new class from the graphical editor's source code."""
+        if self.project is None:
+            return
+        try:
+            self.project.add_class_file(name, source=code)
+            self._refresh_diagram()
+            self._set_status(f"Created class: {name}")
+            self._open_class_editor(name)
+        except Exception as e:
+            self._set_status(f"Error creating class: {e}")
+            self._show_error("Cannot Create Class", str(e))
+
+    def _edit_class_graphical(self, class_name: str) -> None:
+        """Open the graphical class editor for an existing class."""
+        if self.project is None:
+            return
+        cls_info = self.project.model.get_class(class_name)
+        if cls_info is None:
+            return
+
+        def on_save(name: str, code: str) -> None:
+            if self.project is None or cls_info.source_file is None:
+                return
+            if name != class_name:
+                self.project.rename_class(class_name, name)
+            cls_info.source_file.write_text(code)
+            self._refresh_diagram()
+            self._set_status(f"Saved class: {name}")
+
+        dialog = ClassEditorDialog(parent=self, class_info=cls_info, on_save=on_save)
         dialog.show()
 
     def _create_class(self, name: str, kind: ClassKind) -> None:
@@ -495,33 +696,52 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_diagram()
 
     def _action_show_terminal(self) -> None:
-        """Switch to the Terminal tab."""
+        """Switch to the Terminal tab and focus it."""
         self._show_bottom_panel()
         self._bottom_notebook.set_current_page(0)
+        GLib.idle_add(lambda: self.terminal._textview.grab_focus() and False)
 
     def _action_show_code_pad(self) -> None:
-        """Switch to the Code Pad tab."""
+        """Switch to the Code Pad tab and focus the input."""
         self._show_bottom_panel()
         self._bottom_notebook.set_current_page(1)
+        GLib.idle_add(lambda: self.code_pad._input.grab_focus() and False)
 
     def _action_show_debugger(self) -> None:
-        """Switch to the Debugger tab."""
+        """Switch to the Debugger tab and focus the step button."""
         self._show_bottom_panel()
         self._bottom_notebook.set_current_page(2)
+        GLib.idle_add(lambda: self.debugger_panel._btn_step.grab_focus() and False)
 
     def _action_show_ai(self) -> None:
-        """Switch to the AI Panel tab."""
+        """Switch to the AI Panel tab and focus the input."""
         self._show_bottom_panel()
         self._bottom_notebook.set_current_page(3)
+        GLib.idle_add(lambda: self.ai_panel._input.grab_focus() and False)
 
     def _action_toggle_bottom_panel(self) -> None:
         """Hide or show the bottom panel (terminal area)."""
         self._bottom_box.set_visible(not self._bottom_box.get_visible())
 
+    def _action_reset_view(self) -> None:
+        """Reset the class diagram zoom and pan."""
+        if hasattr(self, "diagram"):
+            self.diagram.reset_view()
+            self._set_status("View reset")
+
     def _show_bottom_panel(self) -> None:
         """Ensure the bottom panel is visible."""
         if not self._bottom_box.get_visible():
             self._bottom_box.set_visible(True)
+
+    def _hide_bottom_tab(self, label: str) -> None:
+        """Hide a bottom notebook tab by its label text."""
+        for i in range(self._bottom_notebook.get_n_pages()):
+            child = self._bottom_notebook.get_nth_page(i)
+            tab_label = self._bottom_notebook.get_tab_label(child)
+            if tab_label and hasattr(tab_label, "get_label") and tab_label.get_label() == label:
+                self._bottom_notebook.remove_page(i)
+                break
 
     def _action_preferences(self) -> None:
         """Show the preferences dialog and apply settings on Apply."""
@@ -580,6 +800,7 @@ class MainWindow(Gtk.ApplicationWindow):
         # Update executor
         self.executor = CodeExecutor(path)
         self.executor.namespace["__file__"] = str(path)
+        self.code_pad.update_executor(self.executor)
 
         # Update UI
         self._project_label.set_text(self.project.name)
@@ -616,6 +837,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.diagram.connect("class-moved", self._on_class_moved)
         self.diagram.connect("diagram-right-clicked", self._on_diagram_right_clicked)
         self.diagram.connect("class-selected", self._on_class_selected)
+        self.diagram.connect("class-collapsed", self._on_class_collapsed)
         self._diagram_container.append(self.diagram)
 
     def _refresh_diagram(self) -> None:
@@ -652,6 +874,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         menu.append_section(None, Gio.Menu.new())
         menu.append("Open Editor", f"win.open-editor-{name}")
+        menu.append("Edit (Graphical)...", f"win.graphical-edit-{name}")
         menu.append("Rename...", f"win.rename-{name}")
         menu.append_section(None, Gio.Menu.new())
         menu.append("Delete", f"win.delete-class-{name}")
@@ -677,7 +900,7 @@ class MainWindow(Gtk.ApplicationWindow):
         """Create dynamic actions for class context menu."""
         # Remove old dynamic actions
         for action_name in list(self.list_actions()):
-            if action_name.startswith(("instantiate-", "open-editor-", "rename-", "delete-class-")):
+            if action_name.startswith(("instantiate-", "open-editor-", "graphical-edit-", "rename-", "delete-class-")):
                 self.remove_action(action_name)
 
         # Instantiate
@@ -688,6 +911,11 @@ class MainWindow(Gtk.ApplicationWindow):
         # Open editor
         act = Gio.SimpleAction.new(f"open-editor-{class_name}", None)
         act.connect("activate", lambda a, p: self._open_class_editor(class_name))
+        self.add_action(act)
+
+        # Graphical edit
+        act = Gio.SimpleAction.new(f"graphical-edit-{class_name}", None)
+        act.connect("activate", lambda a, p: self._edit_class_graphical(class_name))
         self.add_action(act)
 
         # Rename
@@ -705,11 +933,18 @@ class MainWindow(Gtk.ApplicationWindow):
         if self.project:
             self.project.set_class_position(name, x, y)
 
+    def _on_class_collapsed(self, diagram: ClassDiagram, name: str, collapsed: bool) -> None:
+        """Handle class box collapse/expand - save state."""
+        if self.project:
+            self.project.set_class_position(name, diagram._boxes[name].x, diagram._boxes[name].y)
+
     def _on_diagram_right_clicked(self, diagram: ClassDiagram, x: float, y: float) -> None:
         """Handle right-click on empty diagram area."""
         menu = Gio.Menu.new()
         menu.append("New Class...", "win.new-class")
         menu.append("Compile All", "win.compile-all")
+        menu.append_section(None, Gio.Menu.new())
+        menu.append("Reset View", "win.reset-view")
 
         popover = Gtk.PopoverMenu.new_from_model(menu)
         rect = Gdk.Rectangle()
@@ -929,15 +1164,49 @@ class MainWindow(Gtk.ApplicationWindow):
 
         def on_create(name: str, class_name: str, args: list) -> None:
             try:
-                obj = self.executor.instantiate(class_name, *args, name=name)
-                self.object_bench.add_object(obj)
-                self.terminal.write_info(f"Created: {obj.name} ({obj.class_name})")
+                if self.debugger.get_breakpoints():
+                    self._debug_instantiate(class_name, args, name)
+                else:
+                    obj = self.executor.instantiate(class_name, *args, name=name)
+                    self.object_bench.add_object(obj)
+                    self.terminal.write_info(f"Created: {obj.name} ({obj.class_name})")
             except Exception as e:
                 self.terminal.write_error(f"Error creating {class_name}: {e}")
                 self._show_error(f"Cannot Create {class_name}", str(e))
 
         dialog = ConstructorDialog(class_name, cls_info, self.executor, parent=self, on_create=on_create)
         dialog.show()
+
+    def _debug_instantiate(self, class_name: str, args: list, name: str) -> None:
+        """Instantiate a class under the debugger in a background thread."""
+        cls = self.executor.namespace.get(class_name)
+        if cls is None or not inspect.isclass(cls):
+            self.terminal.write_error(f"Class '{class_name}' not found")
+            return
+
+        self._show_bottom_panel()
+        self._bottom_notebook.set_current_page(2)  # Debugger tab
+        self.terminal.write_info(f"Debugging: creating {class_name}...")
+
+        def _run() -> None:
+            try:
+                instance = self.debugger.run_call(cls, *args)
+                bench_obj = BenchObject(name=name, instance=instance, class_name=class_name)
+                self.executor.bench[name] = bench_obj
+                self.executor.namespace[name] = instance
+                count = self.executor._bench_counter.get(class_name, 0) + 1
+                self.executor._bench_counter[class_name] = count
+                GLib.idle_add(lambda: self.object_bench.add_object(bench_obj))
+                GLib.idle_add(lambda: self.terminal.write_info(f"Created: {name} ({class_name})"))
+                GLib.idle_add(lambda: self.debugger_panel.set_idle())
+            except Exception as e:
+                err = str(e)
+                GLib.idle_add(lambda: self.terminal.write_error(f"Error: {err}"))
+                GLib.idle_add(lambda: self.debugger_panel.set_idle())
+                GLib.idle_add(lambda: self._show_error(f"Cannot Create {class_name}", err))
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
 
     # --- Object Bench Handlers ---
 
@@ -960,8 +1229,9 @@ class MainWindow(Gtk.ApplicationWindow):
                 methods_section.append(method_name, f"win.call-{name}-{method_name}")
             menu.append_section("Methods", methods_section)
 
-        menu.append_section(None, Gio.Menu.new())
-        menu.append("Remove", f"win.remove-{name}")
+        bluep_section = Gio.Menu.new()
+        bluep_section.append("Remove", f"win.remove-{name}")
+        menu.append_section("BlueP", bluep_section)
 
         # Create dynamic actions
         self._create_bench_context_actions(name)
@@ -1043,8 +1313,10 @@ class MainWindow(Gtk.ApplicationWindow):
         obj = self.executor.bench.get(obj_name)
         if obj is None:
             return
-        dialog = MethodCallDialog(obj, method_name, self.executor, parent=self)
+        dialog = MethodCallDialog(obj, method_name, self.executor, parent=self,
+                                  debugger=self.debugger)
         dialog.connect("object-created", self._on_method_call_object_created)
+        dialog.connect("debug-finished", lambda d: self.debugger_panel.set_idle())
         dialog.show()
 
     def _on_method_call_object_created(self, dialog: MethodCallDialog, name: str) -> None:

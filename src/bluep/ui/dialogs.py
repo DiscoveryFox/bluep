@@ -8,6 +8,8 @@ New Class dialog: creates new classes with templates.
 from __future__ import annotations
 
 import inspect
+import io
+import sys
 from typing import TYPE_CHECKING, Any
 
 import gi
@@ -20,7 +22,43 @@ from bluep.core.class_info import ClassInfo, ClassKind, create_default_template
 from bluep.core.executor import BenchObject, CodeExecutor, ExecutionResult
 
 
-class ObjectInspectorDialog(Gtk.Window):
+class _DialogMixin:
+    """Shared keyboard handling for Gtk.Window-based dialogs.
+
+    Provides:
+    - Esc to close the dialog
+    - Enter to activate the default widget (set via set_default_widget)
+    - Automatic focus on the first focusable widget after map
+    """
+
+    _default_widget: Gtk.Widget | None = None
+
+    def _setup_dialog_keys(self) -> None:
+        ctrl = Gtk.EventControllerKey.new()
+        ctrl.connect("key-pressed", self._on_dialog_key_pressed)
+        self.add_controller(ctrl)
+        self.connect("map", self._on_dialog_map)
+
+    def set_dialog_default(self, widget: Gtk.Widget) -> None:
+        self._default_widget = widget
+        self.set_default_widget(widget)
+
+    def _on_dialog_key_pressed(self, ctrl: Gtk.EventControllerKey, keyval: int,
+                               keycode: int, state: Gdk.ModifierType) -> bool:
+        if keyval == Gdk.KEY_Escape:
+            self.destroy()
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            if self._default_widget and self._default_widget.get_sensitive():
+                self._default_widget.activate()
+                return True
+        return False
+
+    def _on_dialog_map(self, widget: Gtk.Widget) -> None:
+        pass
+
+
+class ObjectInspectorDialog(Gtk.Window, _DialogMixin):
     """Dialog for inspecting an object's fields and methods.
 
     Mirrors BlueJ's Object Inspector:
@@ -144,14 +182,18 @@ class ObjectInspectorDialog(Gtk.Window):
         # Close button
         btn_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
         btn_box.set_halign(Gtk.Align.END)
+        btn_box.add_css_class("bluep-dialog-actions")
         btn_box.set_margin_top(8)
-        btn_close = Gtk.Button.new_with_label("Close")
+        btn_close = Gtk.Button.new_with_label("_Close")
         btn_close.add_css_class("bluep-btn")
+        btn_close.set_use_underline(True)
         btn_close.connect("clicked", lambda b: self.destroy())
         btn_box.append(btn_close)
         content.append(btn_box)
 
-        # Populate
+        self.set_dialog_default(btn_close)
+        self._setup_dialog_keys()
+
         self._populate_fields()
         self._populate_methods()
 
@@ -245,7 +287,7 @@ class ObjectInspectorDialog(Gtk.Window):
         pass
 
 
-class MethodCallDialog(Gtk.Window):
+class MethodCallDialog(Gtk.Window, _DialogMixin):
     """Dialog for calling a method with parameters and showing the result.
 
     Mirrors BlueJ's method call dialog:
@@ -257,20 +299,28 @@ class MethodCallDialog(Gtk.Window):
 
     __gsignals__ = {
         "object-created": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "debug-finished": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, bench_object: BenchObject, method_name: str,
-                 executor: CodeExecutor, parent: Gtk.Window | None = None) -> None:
+                 executor: CodeExecutor, parent: Gtk.Window | None = None,
+                 debugger: Any = None) -> None:
         super().__init__()
         self.set_title(f"Call: {method_name}")
         self.set_default_size(400, 300)
         self.set_transient_for(parent)
-        self.set_modal(True)
         self.add_css_class("bluep-dialog")
 
         self.bench_object = bench_object
         self.method_name = method_name
         self.executor = executor
+        self.debugger = debugger
+        self._debug_thread: Any = None
+
+        # When breakpoints are set, make non-modal so user can interact
+        # with the debugger panel while the call is paused.
+        has_bps = debugger is not None and bool(debugger.get_breakpoints())
+        self.set_modal(not has_bps)
 
         # Get method info
         method = getattr(bench_object.instance, method_name)
@@ -333,6 +383,7 @@ class MethodCallDialog(Gtk.Window):
         content.append(params_label)
 
         self._param_entries: dict[str, Gtk.Entry] = {}
+        self._param_warnings: dict[str, Gtk.Label] = {}
         params = list(self.signature.parameters.values())
 
         if params:
@@ -340,7 +391,6 @@ class MethodCallDialog(Gtk.Window):
             params_box.set_row_spacing(4)
             params_box.set_column_spacing(8)
             for i, param in enumerate(params):
-                # Label
                 param_type = str(param.annotation) if param.annotation != param.empty else "Any"
                 label_text = f"{param.name}: {param_type}"
                 if param.default != param.empty:
@@ -349,14 +399,22 @@ class MethodCallDialog(Gtk.Window):
                 label.set_halign(Gtk.Align.START)
                 params_box.attach(label, 0, i, 1, 1)
 
-                # Entry
                 entry = Gtk.Entry.new()
                 entry.set_placeholder_text(f"Enter value for {param.name}")
                 if param.default != param.empty:
                     entry.set_text(str(param.default))
                 entry.set_hexpand(True)
+                entry.connect("changed", self._on_param_changed, param.name)
                 self._param_entries[param.name] = entry
                 params_box.attach(entry, 1, i, 1, 1)
+
+                warning = Gtk.Label.new("")
+                warning.set_halign(Gtk.Align.START)
+                warning.set_xalign(0)
+                warning.add_css_class("bluep-error-text")
+                warning.set_visible(False)
+                self._param_warnings[param.name] = warning
+                params_box.attach(warning, 1, i + 1, 1, 1)
             content.append(params_box)
         else:
             content.append(Gtk.Label.new("(no parameters)"))
@@ -372,33 +430,52 @@ class MethodCallDialog(Gtk.Window):
         # Buttons
         btn_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
         btn_box.set_halign(Gtk.Align.END)
+        btn_box.add_css_class("bluep-dialog-actions")
         btn_box.set_margin_top(8)
 
-        btn_cancel = Gtk.Button.new_with_label("Cancel")
+        btn_cancel = Gtk.Button.new_with_label("_Cancel")
         btn_cancel.add_css_class("bluep-btn")
+        btn_cancel.set_use_underline(True)
         btn_cancel.connect("clicked", lambda b: self.destroy())
         btn_box.append(btn_cancel)
 
-        btn_call = Gtk.Button.new_with_label("Call")
+        btn_call = Gtk.Button.new_with_label("_Call")
         btn_call.add_css_class("bluep-btn-primary")
+        btn_call.set_use_underline(True)
         btn_call.connect("clicked", self._on_call)
         btn_box.append(btn_call)
 
         content.append(btn_box)
 
-        # Result area (shown after call)
+        self.set_dialog_default(btn_call)
+        self._setup_dialog_keys()
+
         self._result_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 4)
         self._result_box.set_visible(False)
         content.append(self._result_box)
 
-        # Focus first entry or call button
         if self._param_entries:
             first_entry = list(self._param_entries.values())[0]
             GLib.idle_add(lambda: first_entry.grab_focus() and False)
 
+    def _on_param_changed(self, entry: Gtk.Entry, param_name: str) -> None:
+        text = entry.get_text().strip()
+        warning = self._param_warnings.get(param_name)
+        if not warning:
+            return
+        if not text:
+            warning.set_text("")
+            warning.set_visible(False)
+            return
+        try:
+            eval(text, self.executor.namespace)
+            warning.set_text("")
+            warning.set_visible(False)
+        except Exception:
+            warning.set_text(f"Will be treated as string: {text!r}")
+            warning.set_visible(True)
+
     def _on_call(self, button: Gtk.Button) -> None:
-        """Execute the method call."""
-        # Parse parameters
         args: list[Any] = []
         kwargs: dict[str, Any] = {}
 
@@ -410,15 +487,67 @@ class MethodCallDialog(Gtk.Window):
                 value = eval(text, self.executor.namespace)
                 kwargs[param_name] = value
             except Exception:
-                # Treat as string
                 kwargs[param_name] = text
 
-        # Call the method
+        if self.debugger is not None and self.debugger.get_breakpoints():
+            self._debug_call(args, kwargs)
+            return
+
         result = self.executor.call_bench_method(
             self.bench_object.name, self.method_name, *args, **kwargs
         )
+        self._show_result(result)
 
-        # Show result
+    def _debug_call(self, args: list, kwargs: dict) -> None:
+        """Run the method call under the debugger in a background thread."""
+        import threading as _threading
+
+        method = getattr(self.bench_object.instance, self.method_name)
+
+        self._show_debugging_status()
+
+        def _run() -> None:
+            old_stdout = sys.stdout
+            buf = io.StringIO()
+            sys.stdout = buf
+            try:
+                result_value = self.debugger.run_call(method, *args, **kwargs)
+                output = buf.getvalue()
+                GLib.idle_add(lambda: self._show_debug_result(result_value, output))
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"
+                GLib.idle_add(lambda: self._show_debug_error(err))
+            finally:
+                sys.stdout = old_stdout
+                GLib.idle_add(lambda: self.emit("debug-finished"))
+
+        thread = _threading.Thread(target=_run, daemon=True)
+        self._debug_thread = thread
+        thread.start()
+
+    def _show_debugging_status(self) -> None:
+        """Show a 'Debugging...' message in the result area."""
+        while self._result_box.get_first_child():
+            self._result_box.remove(self._result_box.get_first_child())
+        self._result_box.set_visible(True)
+        sep = Gtk.Separator.new(Gtk.Orientation.HORIZONTAL)
+        self._result_box.append(sep)
+        label = Gtk.Label.new("Debugging... (use Step/Continue in debugger panel)")
+        label.set_halign(Gtk.Align.START)
+        label.set_margin_top(8)
+        label.add_css_class("bluep-status-bar")
+        self._result_box.append(label)
+
+    def _show_debug_result(self, value: Any, output: str) -> None:
+        """Show the result after debugging completes."""
+        from bluep.core.executor import ExecutionResult
+        result = ExecutionResult(success=True, output=output, value=value)
+        self._show_result(result)
+
+    def _show_debug_error(self, error: str) -> None:
+        """Show an error after debugging fails."""
+        from bluep.core.executor import ExecutionResult
+        result = ExecutionResult(success=False, error=error)
         self._show_result(result)
 
     def _show_result(self, result: ExecutionResult) -> None:
@@ -467,6 +596,7 @@ class MethodCallDialog(Gtk.Window):
                 # If it's an object, offer to put on bench
                 if not isinstance(result.value, (int, float, str, bool, type(None), list, dict, tuple)):
                     btn_bench = Gtk.Button.new_with_label("Get")
+                    btn_bench.add_css_class("bluep-btn")
                     btn_bench.set_tooltip_text("Place result on object bench")
                     btn_bench.connect("clicked", lambda b: self._put_on_bench(result.value))
                     value_box.append(btn_bench)
@@ -500,7 +630,7 @@ class MethodCallDialog(Gtk.Window):
         self.emit("object-created", name)
 
 
-class NewClassDialog(Gtk.Window):
+class NewClassDialog(Gtk.Window, _DialogMixin):
     """Dialog for creating a new class - mirrors BlueJ's New Class dialog."""
 
     __gsignals__ = {
@@ -511,7 +641,7 @@ class NewClassDialog(Gtk.Window):
                  on_create: Any = None) -> None:
         super().__init__()
         self.set_title("New Class")
-        self.set_default_size(350, 250)
+        self.set_default_size(350, 280)
         self.set_transient_for(parent)
         self.set_modal(True)
         self.add_css_class("bluep-dialog")
@@ -533,17 +663,29 @@ class NewClassDialog(Gtk.Window):
         main_box.append(content)
 
         # Class name
-        name_label = Gtk.Label.new("Class Name:")
-        name_label.set_halign(Gtk.Align.START)
-        content.append(name_label)
-
         self._name_entry = Gtk.Entry.new()
         self._name_entry.set_placeholder_text("e.g., Student, Person, Car")
+        self._name_entry.connect("changed", self._on_name_changed)
+
+        name_label = Gtk.Label.new("_Class Name:")
+        name_label.set_halign(Gtk.Align.START)
+        name_label.set_use_underline(True)
+        name_label.set_mnemonic_widget(self._name_entry)
+        content.append(name_label)
         content.append(self._name_entry)
 
+        self._name_error = Gtk.Label.new("")
+        self._name_error.set_halign(Gtk.Align.START)
+        self._name_error.set_xalign(0)
+        self._name_error.add_css_class("bluep-error-text")
+        self._name_error.set_margin_top(2)
+        self._name_error.set_visible(False)
+        content.append(self._name_error)
+
         # Kind selector
-        kind_label = Gtk.Label.new("Class Type:")
+        kind_label = Gtk.Label.new("Class _Type:")
         kind_label.set_halign(Gtk.Align.START)
+        kind_label.set_use_underline(True)
         kind_label.set_margin_top(8)
         content.append(kind_label)
 
@@ -569,20 +711,25 @@ class NewClassDialog(Gtk.Window):
         # Buttons
         btn_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
         btn_box.set_halign(Gtk.Align.END)
+        btn_box.add_css_class("bluep-dialog-actions")
         btn_box.set_margin_top(16)
 
-        btn_cancel = Gtk.Button.new_with_label("Cancel")
+        btn_cancel = Gtk.Button.new_with_label("_Cancel")
         btn_cancel.add_css_class("bluep-btn")
+        btn_cancel.set_use_underline(True)
         btn_cancel.connect("clicked", lambda b: self.destroy())
         btn_box.append(btn_cancel)
 
-        btn_create = Gtk.Button.new_with_label("Create")
+        btn_create = Gtk.Button.new_with_label("C_reate")
         btn_create.add_css_class("bluep-btn-primary")
+        btn_create.set_use_underline(True)
         btn_create.connect("clicked", self._on_create_clicked)
         btn_box.append(btn_create)
 
         content.append(btn_box)
 
+        self.set_dialog_default(btn_create)
+        self._setup_dialog_keys()
         GLib.idle_add(self._grab_name_focus)
 
     def _grab_name_focus(self) -> bool:
@@ -609,14 +756,28 @@ class NewClassDialog(Gtk.Window):
         text = self._KIND_HELP.get(index, "")
         self._kind_help.set_text(text)
 
+    def _on_name_changed(self, entry: Gtk.Entry) -> None:
+        name = entry.get_text().strip()
+        if not name:
+            self._name_error.set_text("Name is required")
+            self._name_error.set_visible(True)
+        elif not name.isidentifier():
+            self._name_error.set_text("Not a valid Python identifier")
+            self._name_error.set_visible(True)
+        else:
+            self._name_error.set_text("")
+            self._name_error.set_visible(False)
+
     def _on_create_clicked(self, button: Gtk.Button) -> None:
-        """Handle create button click."""
         name = self._name_entry.get_text().strip()
         if not name:
+            self._name_error.set_text("Name is required")
+            self._name_error.set_visible(True)
             return
 
-        # Validate Python identifier
         if not name.isidentifier():
+            self._name_error.set_text("Not a valid Python identifier")
+            self._name_error.set_visible(True)
             return
 
         kind_index = self._kind_combo.get_selected()
@@ -636,7 +797,7 @@ class NewClassDialog(Gtk.Window):
         self.destroy()
 
 
-class ConstructorDialog(Gtk.Window):
+class ConstructorDialog(Gtk.Window, _DialogMixin):
     """Dialog for creating a new instance - mirrors BlueJ's constructor dialog.
 
     Prompts for object name and constructor parameters.
@@ -689,16 +850,25 @@ class ConstructorDialog(Gtk.Window):
         content.append(help_label)
 
         # Object name
-        name_label = Gtk.Label.new("Name of instance:")
-        name_label.set_halign(Gtk.Align.START)
-        content.append(name_label)
-
         self._name_entry = Gtk.Entry.new()
-        # Default name: lowercase first letter + count
         default_name = class_name[0].lower() + class_name[1:] if class_name else "obj"
         count = executor._bench_counter.get(class_name, 0) + 1
         self._name_entry.set_text(f"{default_name}{count}")
+        self._name_entry.connect("changed", self._on_name_changed)
+
+        name_label = Gtk.Label.new("Name of _instance:")
+        name_label.set_halign(Gtk.Align.START)
+        name_label.set_use_underline(True)
+        name_label.set_mnemonic_widget(self._name_entry)
+        content.append(name_label)
         content.append(self._name_entry)
+
+        self._name_error = Gtk.Label.new("")
+        self._name_error.set_halign(Gtk.Align.START)
+        self._name_error.set_xalign(0)
+        self._name_error.add_css_class("bluep-error-text")
+        self._name_error.set_margin_top(2)
+        content.append(self._name_error)
 
         # Constructor parameters
         constructor = None
@@ -712,6 +882,7 @@ class ConstructorDialog(Gtk.Window):
             content.append(params_label)
 
             self._param_entries: dict[str, Gtk.Entry] = {}
+            self._param_warnings: dict[str, Gtk.Label] = {}
             params_box = Gtk.Grid.new()
             params_box.set_row_spacing(4)
             params_box.set_column_spacing(8)
@@ -724,34 +895,88 @@ class ConstructorDialog(Gtk.Window):
                 entry = Gtk.Entry.new()
                 entry.set_placeholder_text(f"Enter value for {param_name}")
                 entry.set_hexpand(True)
+                entry.connect("changed", self._on_param_changed, param_name)
                 self._param_entries[param_name] = entry
                 params_box.attach(entry, 1, i, 1, 1)
+
+                warning = Gtk.Label.new("")
+                warning.set_halign(Gtk.Align.START)
+                warning.set_xalign(0)
+                warning.add_css_class("bluep-error-text")
+                warning.set_visible(False)
+                self._param_warnings[param_name] = warning
+                params_box.attach(warning, 1, i + 1, 1, 1)
             content.append(params_box)
         else:
             self._param_entries = {}
+            self._param_warnings = {}
             content.append(Gtk.Label.new("(no constructor parameters)"))
 
-        # Buttons
         btn_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
         btn_box.set_halign(Gtk.Align.END)
+        btn_box.add_css_class("bluep-dialog-actions")
         btn_box.set_margin_top(8)
 
-        btn_cancel = Gtk.Button.new_with_label("Cancel")
+        btn_cancel = Gtk.Button.new_with_label("_Cancel")
         btn_cancel.add_css_class("bluep-btn")
+        btn_cancel.set_use_underline(True)
         btn_cancel.connect("clicked", lambda b: self.destroy())
         btn_box.append(btn_cancel)
 
-        btn_create = Gtk.Button.new_with_label("Create")
+        btn_create = Gtk.Button.new_with_label("C_reate")
         btn_create.add_css_class("bluep-btn-primary")
+        btn_create.set_use_underline(True)
         btn_create.connect("clicked", self._on_create_clicked)
         btn_box.append(btn_create)
 
         content.append(btn_box)
 
+        self.set_dialog_default(btn_create)
+        self._setup_dialog_keys()
+        GLib.idle_add(lambda: self._name_entry.grab_focus() and False)
+
+    def _on_name_changed(self, entry: Gtk.Entry) -> None:
+        name = entry.get_text().strip()
+        if name and name in self.executor.bench:
+            self._name_error.set_text(f"Name '{name}' already exists on the bench")
+            self._name_error.set_visible(True)
+        elif name and not name.isidentifier():
+            self._name_error.set_text("Not a valid Python identifier")
+            self._name_error.set_visible(True)
+        else:
+            self._name_error.set_text("")
+            self._name_error.set_visible(False)
+
+    def _on_param_changed(self, entry: Gtk.Entry, param_name: str) -> None:
+        text = entry.get_text().strip()
+        warning = self._param_warnings.get(param_name)
+        if not warning:
+            return
+        if not text:
+            warning.set_text("")
+            warning.set_visible(False)
+            return
+        try:
+            eval(text, self.executor.namespace)
+            warning.set_text("")
+            warning.set_visible(False)
+        except Exception as exc:
+            warning.set_text(f"Will be treated as string: {text!r}")
+            warning.set_visible(True)
+
     def _on_create_clicked(self, button: Gtk.Button) -> None:
-        """Handle create button."""
         name = self._name_entry.get_text().strip()
-        if not name or not name.isidentifier():
+        if not name:
+            self._name_error.set_text("Name is required")
+            self._name_error.set_visible(True)
+            return
+        if not name.isidentifier():
+            self._name_error.set_text("Not a valid Python identifier")
+            self._name_error.set_visible(True)
+            return
+        if name in self.executor.bench:
+            self._name_error.set_text(f"Name '{name}' already exists on the bench")
+            self._name_error.set_visible(True)
             return
 
         # Parse parameters
@@ -773,7 +998,7 @@ class ConstructorDialog(Gtk.Window):
         self.destroy()
 
 
-class RenameClassDialog(Gtk.Window):
+class RenameClassDialog(Gtk.Window, _DialogMixin):
     """Dialog for renaming a class.
 
     Renames both the source file (e.g. `Student.py` → `Person.py`) and the
@@ -833,13 +1058,15 @@ class RenameClassDialog(Gtk.Window):
         current_box.append(cur)
         content.append(current_box)
 
-        new_label = Gtk.Label.new("New name:")
-        new_label.set_halign(Gtk.Align.START)
-        content.append(new_label)
-
         self._name_entry = Gtk.Entry.new()
         self._name_entry.set_text(class_name)
         self._name_entry.connect("changed", self._on_name_changed)
+
+        new_label = Gtk.Label.new("_New name:")
+        new_label.set_halign(Gtk.Align.START)
+        new_label.set_use_underline(True)
+        new_label.set_mnemonic_widget(self._name_entry)
+        content.append(new_label)
         content.append(self._name_entry)
 
         self._status = Gtk.Label.new("")
@@ -851,19 +1078,25 @@ class RenameClassDialog(Gtk.Window):
 
         btn_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
         btn_box.set_halign(Gtk.Align.END)
+        btn_box.add_css_class("bluep-dialog-actions")
         btn_box.set_margin_top(8)
 
-        btn_cancel = Gtk.Button.new_with_label("Cancel")
+        btn_cancel = Gtk.Button.new_with_label("_Cancel")
         btn_cancel.add_css_class("bluep-btn")
+        btn_cancel.set_use_underline(True)
         btn_cancel.connect("clicked", lambda b: self.destroy())
         btn_box.append(btn_cancel)
 
-        self._btn_rename = Gtk.Button.new_with_label("Rename")
+        self._btn_rename = Gtk.Button.new_with_label("_Rename")
         self._btn_rename.add_css_class("bluep-btn-primary")
+        self._btn_rename.set_use_underline(True)
         self._btn_rename.connect("clicked", self._on_rename_clicked)
         btn_box.append(self._btn_rename)
 
         content.append(btn_box)
+
+        self.set_dialog_default(self._btn_rename)
+        self._setup_dialog_keys()
 
         self._validate()
         GLib.idle_add(self._grab_focus)
@@ -912,7 +1145,7 @@ class RenameClassDialog(Gtk.Window):
         self.destroy()
 
 
-class PreferencesDialog(Gtk.Window):
+class PreferencesDialog(Gtk.Window, _DialogMixin):
     """Tabbed preferences dialog: General, Python, Editor, AI.
 
     Settings persist to ~/.config/bluep/settings.json via Config.save().
@@ -956,22 +1189,28 @@ class PreferencesDialog(Gtk.Window):
 
         btn_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
         btn_box.set_halign(Gtk.Align.END)
+        btn_box.add_css_class("bluep-dialog-actions")
         btn_box.set_margin_start(12)
         btn_box.set_margin_end(12)
         btn_box.set_margin_top(8)
         btn_box.set_margin_bottom(8)
 
-        btn_cancel = Gtk.Button.new_with_label("Cancel")
+        btn_cancel = Gtk.Button.new_with_label("_Cancel")
         btn_cancel.add_css_class("bluep-btn")
+        btn_cancel.set_use_underline(True)
         btn_cancel.connect("clicked", lambda b: self.destroy())
         btn_box.append(btn_cancel)
 
-        btn_apply = Gtk.Button.new_with_label("Apply")
+        btn_apply = Gtk.Button.new_with_label("_Apply")
         btn_apply.add_css_class("bluep-btn-primary")
+        btn_apply.set_use_underline(True)
         btn_apply.connect("clicked", self._on_apply)
         btn_box.append(btn_apply)
 
         main_box.append(btn_box)
+
+        self.set_dialog_default(btn_apply)
+        self._setup_dialog_keys()
 
     # ── General tab ───────────────────────────────────────────────────
 
@@ -1121,6 +1360,21 @@ class PreferencesDialog(Gtk.Window):
             e.enable_autocomplete
         )
 
+        accept_row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+        accept_row.set_halign(Gtk.Align.FILL)
+        accept_label = Gtk.Label.new("Accept with")
+        accept_label.set_xalign(0)
+        accept_label.set_size_request(140, -1)
+        accept_row.append(accept_label)
+        self._ed_accept_key = Gtk.DropDown.new_from_strings(["Tab", "Enter"])
+        self._ed_accept_key.set_valign(Gtk.Align.CENTER)
+        self._ed_accept_key.set_tooltip_text(
+            "Which key accepts an autocomplete suggestion"
+        )
+        self._ed_accept_key.set_selected(0 if e.completion_accept_key == "tab" else 1)
+        accept_row.append(self._ed_accept_key)
+        box.append(accept_row)
+
         can_ai_completion = bool(self._config.ai.api_key) and not self._supervised
         self._ed_ai_completion = self._row_switch(
             box, "AI code completion",
@@ -1261,6 +1515,9 @@ class PreferencesDialog(Gtk.Window):
         self._config.editor.smart_backspace = self._ed_smart_backspace.get_active()
         self._config.editor.enable_syntax_highlighting = self._ed_syntax_highlight.get_active()
         self._config.editor.enable_autocomplete = self._ed_autocomplete.get_active()
+        self._config.editor.completion_accept_key = (
+            "tab" if self._ed_accept_key.get_selected() == 0 else "enter"
+        )
         if self._ed_ai_completion.get_sensitive():
             self._config.editor.enable_ai_completion = self._ed_ai_completion.get_active()
 

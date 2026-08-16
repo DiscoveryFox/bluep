@@ -21,7 +21,7 @@ import builtins as _builtins_mod
 import keyword
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -30,6 +30,38 @@ from gi.repository import Gtk, Gdk, GLib, GObject, Pango
 
 from bluep.core.class_info import ClassInfo
 
+try:
+    gi.require_version("GtkSource", "5")
+    from gi.repository import GtkSource as _GtkSource  # noqa: F401
+    HAS_GTKSOURCE = True
+except (ImportError, ValueError):
+    HAS_GTKSOURCE = False
+
+_PYTHON_LANG: Any = None
+_PYTHON_SCHEME: Any = None
+
+
+def _get_python_language() -> Any:
+    global _PYTHON_LANG
+    if _PYTHON_LANG is not None or not HAS_GTKSOURCE:
+        return _PYTHON_LANG
+    manager = _GtkSource.LanguageManager.get_default()
+    _PYTHON_LANG = manager.get_language("python")
+    return _PYTHON_LANG
+
+
+def _get_python_scheme() -> Any:
+    global _PYTHON_SCHEME
+    if _PYTHON_SCHEME is not None or not HAS_GTKSOURCE:
+        return _PYTHON_SCHEME
+    style_manager = _GtkSource.StyleSchemeManager.get_default()
+    for scheme_id in ["Catppuccin-mocha", "cobalt", "dark", "Kate", "oblivion"]:
+        scheme = style_manager.get_scheme(scheme_id)
+        if scheme:
+            _PYTHON_SCHEME = scheme
+            break
+    return _PYTHON_SCHEME
+
 # Python completion sources
 _PYTHON_KEYWORDS = sorted(keyword.kwlist)
 _PYTHON_BUILTINS = sorted(
@@ -37,6 +69,58 @@ _PYTHON_BUILTINS = sorted(
     if not name.startswith("_") and name[0].isalpha()
 )
 _COMPLETION_WORDS = sorted(set(_PYTHON_KEYWORDS + _PYTHON_BUILTINS))
+
+_KW_SET = set(keyword.kwlist)
+_BUILTIN_SET = set(
+    name for name in dir(_builtins_mod)
+    if not name.startswith("_") and name[0].isalpha()
+)
+
+# Precompute builtin details: (kind, detail_label, is_callable)
+_BUILTIN_DETAILS: dict[str, tuple[str, str, bool]] = {}
+for _bn in _PYTHON_BUILTINS:
+    _bo = getattr(_builtins_mod, _bn, None)
+    if _bo is None:
+        continue
+    if isinstance(_bo, type):
+        _BUILTIN_DETAILS[_bn] = ("class", "type", True)
+    elif callable(_bo):
+        _BUILTIN_DETAILS[_bn] = ("builtin", "function", True)
+    else:
+        _BUILTIN_DETAILS[_bn] = ("constant", "const", False)
+
+
+class CompletionItem(NamedTuple):
+    text: str
+    kind: str
+    detail: str
+    insert: str
+    cursor_back: int
+
+
+_COMPLETION_KIND_LABEL = {
+    "keyword":   ("kw",    "#cba6f7"),
+    "builtin":   ("fn",    "#89b4fa"),
+    "class":     ("cls",   "#f9e2af"),
+    "constant":  ("const", "#fab387"),
+    "def":       ("def",   "#a6e3a1"),
+    "buffer":    ("var",   "#a6e3a1"),
+    "attr":      ("attr",  "#89dceb"),
+    "module":    ("mod",   "#f5c2e7"),
+    "import":    ("imp",   "#94e2d5"),
+}
+
+_COMPLETION_KIND_CSS = {
+    "keyword":   "bluep-kind-keyword",
+    "builtin":   "bluep-kind-builtin",
+    "class":     "bluep-kind-class",
+    "constant":  "bluep-kind-constant",
+    "def":       "bluep-kind-def",
+    "buffer":    "bluep-kind-buffer",
+    "attr":      "bluep-kind-attr",
+    "module":    "bluep-kind-module",
+    "import":    "bluep-kind-import",
+}
 
 # Bracket auto-closing pairs
 _BRACKET_PAIRS = {
@@ -85,6 +169,12 @@ class CodeEditor(Gtk.Box):
         self._insert_spaces: bool = True
         self._auto_indent: bool = True
         self._enable_autocomplete: bool = True
+        self._completion_accept_key: str = "tab"
+        self._completion_active: bool = False
+
+        self._font_family: str = "Monospace"
+        self._font_size: int = 12
+        self._css_provider: Gtk.CssProvider | None = None
 
         # Completion state
         self._completion_popover: Gtk.Popover | None = None
@@ -92,6 +182,11 @@ class CodeEditor(Gtk.Box):
         self._completion_words: list[str] = []
         self._completion_prefix: str = ""
         self._completion_blocked: bool = False
+        self._completion_debounce_id: int = 0
+
+        # Ghost text state (VS Code-style inline preview)
+        self._ghost_label: Gtk.Label | None = None
+        self._ghost_item: CompletionItem | None = None
 
         # Source view with GtkSourceView
         try:
@@ -100,18 +195,13 @@ class CodeEditor(Gtk.Box):
             self._buffer = GtkSource.Buffer.new()
             self._view = GtkSource.View.new_with_buffer(self._buffer)
             # Set up syntax highlighting
-            manager = GtkSource.LanguageManager.new()
-            lang = manager.get_language("python")
+            lang = _get_python_language()
             if lang:
                 self._buffer.set_language(lang)
             # Style
-            style_manager = GtkSource.StyleSchemeManager.new()
-            # Try to find a dark scheme
-            for scheme_id in ["Catppuccin-mocha", "cobalt", "dark", "Kate", "oblivion"]:
-                scheme = style_manager.get_scheme(scheme_id)
-                if scheme:
-                    self._buffer.set_style_scheme(scheme)
-                    break
+            scheme = _get_python_scheme()
+            if scheme:
+                self._buffer.set_style_scheme(scheme)
             # Line numbers
             self._view.set_show_line_numbers(True)
             # Highlight current line
@@ -128,11 +218,18 @@ class CodeEditor(Gtk.Box):
             self._view.set_monospace(True)
             self._has_sourceview = True
         except (ImportError, ValueError):
-            # Fall back to plain TextView
             self._buffer = Gtk.TextBuffer.new()
             self._view = Gtk.TextView.new_with_buffer(self._buffer)
             self._view.set_monospace(True)
             self._has_sourceview = False
+            import warnings
+            warnings.warn(
+                "GtkSourceView 5 is not available - falling back to plain Gtk.TextView. "
+                "Syntax highlighting, line numbers, and code folding are disabled. "
+                "Install gtksourceview5 (e.g. 'pacman -S gtksourceview5' on Arch, "
+                "'apt install libgtksourceview-5-dev' on Debian/Ubuntu) for full editor features.",
+                stacklevel=2,
+            )
 
         # Common view settings
         self._view.set_vexpand(True)
@@ -151,20 +248,33 @@ class CodeEditor(Gtk.Box):
 
         # Key press for compile (Ctrl+S), Tab, brackets, autocomplete
         key_controller = Gtk.EventControllerKey.new()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self._on_key_pressed)
         self._view.add_controller(key_controller)
 
-        # Scrollable area
+        # Scrollable area inside overlay (for ghost text positioning)
+        self._overlay = Gtk.Overlay.new()
         scroll = Gtk.ScrolledWindow.new()
         scroll.set_child(self._view)
         scroll.set_vexpand(True)
         scroll.set_hexpand(True)
-        self.append(scroll)
+        self._overlay.set_child(scroll)
+
+        self._ghost_label = Gtk.Label.new("")
+        self._ghost_label.add_css_class("bluep-ghost-text")
+        self._ghost_label.set_visible(False)
+        self._ghost_label.set_can_target(False)
+        self._overlay.add_overlay(self._ghost_label)
+        self._overlay.connect("get-child-position", self._on_overlay_get_child_position)
+
+        self.append(self._overlay)
+        self.connect("destroy", self._on_destroy)
 
         # Build completion popover (lazy, shown on demand)
         self._init_completion()
 
-        # Load file if provided
+        self._apply_font_css()
+
         if file_path and file_path.exists():
             self.load_file(file_path)
 
@@ -179,8 +289,8 @@ class CodeEditor(Gtk.Box):
         popover.add_css_class("bluep-completion")
 
         scrolled = Gtk.ScrolledWindow.new()
-        scrolled.set_max_content_height(180)
-        scrolled.set_max_content_width(280)
+        scrolled.set_max_content_height(240)
+        scrolled.set_max_content_width(360)
         scrolled.set_propagate_natural_height(True)
         scrolled.set_propagate_natural_width(True)
 
@@ -193,6 +303,39 @@ class CodeEditor(Gtk.Box):
 
         self._completion_popover = popover
         self._completion_list = lst
+
+    def _build_completion_row(self, item: CompletionItem) -> Gtk.ListBoxRow:
+        badge_text, badge_color = _COMPLETION_KIND_LABEL.get(
+            item.kind, ("?", "#a6adc8")
+        )
+        hbox = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+        badge = Gtk.Label.new(badge_text)
+        badge.set_size_request(22, -1)
+        badge.set_xalign(0.5)
+        badge.set_valign(Gtk.Align.CENTER)
+        badge.add_css_class("bluep-completion-badge")
+        kind_css = _COMPLETION_KIND_CSS.get(item.kind)
+        if kind_css:
+            badge.add_css_class(kind_css)
+        hbox.append(badge)
+        name = Gtk.Label.new(item.text)
+        name.set_xalign(0.0)
+        name.set_halign(Gtk.Align.START)
+        name.set_hexpand(True)
+        name.add_css_class("bluep-completion-name")
+        hbox.append(name)
+        if item.detail:
+            detail = Gtk.Label.new(item.detail)
+            detail.set_xalign(1.0)
+            detail.set_halign(Gtk.Align.END)
+            detail.set_valign(Gtk.Align.CENTER)
+            detail.add_css_class("bluep-completion-detail")
+            hbox.append(detail)
+        row = Gtk.ListBoxRow.new()
+        row.set_child(hbox)
+        row.add_css_class("bluep-completion-row")
+        row.completion_item = item  # type: ignore[attr-defined]
+        return row
 
     def _current_word_bounds(self) -> tuple[Any, Any, str]:
         """Return (start_iter, end_iter, word) at the cursor.
@@ -211,93 +354,196 @@ class CodeEditor(Gtk.Box):
         word = self._buffer.get_text(start, end, True)
         return start, end, word
 
-    def _gather_completions(self, prefix: str) -> list[str]:
-        """Return completion candidates for `prefix` (lowercased match).."""
+    def _make_std_item(self, w: str) -> CompletionItem:
+        if w in _KW_SET:
+            return CompletionItem(w, "keyword", "keyword", w, 0)
+        kind, detail, callable_ = _BUILTIN_DETAILS.get(w, ("builtin", "builtin", False))
+        if callable_:
+            return CompletionItem(w, kind, detail, w + "()", 1)
+        return CompletionItem(w, kind, detail, w, 0)
+
+    def _parse_buffer_names(self, text: str) -> dict[str, tuple[str, str]]:
+        """Classify buffer identifiers as def/class/import/local."""
+        out: dict[str, tuple[str, str]] = {}
+        for line in text.splitlines():
+            s = line.lstrip()
+            m = re.match(r"def\s+(\w+)", s)
+            if m:
+                out[m.group(1)] = ("def", "def")
+                continue
+            m = re.match(r"class\s+(\w+)", s)
+            if m:
+                out[m.group(1)] = ("class", "class")
+                continue
+            m = re.match(r"from\s+\S+\s+import\s+(.+)", s)
+            if m:
+                for name in re.findall(r"\b(\w+)\b", m.group(1)):
+                    if name != "as":
+                        out[name] = ("import", "import")
+                continue
+            m = re.match(r"import\s+(\S+)\s+as\s+(\w+)", s)
+            if m:
+                out[m.group(2)] = ("import", "import")
+                continue
+            m = re.match(r"import\s+(\w+)", s)
+            if m:
+                out[m.group(1)] = ("import", "import")
+        return out
+
+    def _dot_object_before(self, start_iter: Any) -> str | None:
+        """Return the identifier before a dot at start_iter, or None."""
+        before = start_iter.copy()
+        if not before.backward_char():
+            return None
+        if before.get_char() != ".":
+            return None
+        obj_end = before.copy()
+        obj_start = obj_end.copy()
+        while obj_start.backward_char():
+            ch = obj_start.get_char()
+            if not (ch.isalnum() or ch == "_"):
+                obj_start.forward_char()
+                break
+        obj_name = self._buffer.get_text(obj_start, obj_end, True)
+        return obj_name if obj_name else None
+
+    def _gather_name_completions(self, prefix: str, exclude: str = "") -> list[CompletionItem]:
         if not prefix:
             return []
         pre = prefix.lower()
-        # Static keywords + builtins
-        candidates = [w for w in _COMPLETION_WORDS if w.lower().startswith(pre)]
-        # Words from current buffer
+        do_substr = len(pre) >= 2
+        prefix_items: list[CompletionItem] = []
+        substr_items: list[CompletionItem] = []
+        seen: set[str] = set()
+        if exclude:
+            seen.add(exclude)
+
+        for w in _COMPLETION_WORDS:
+            wl = w.lower()
+            if wl.startswith(pre):
+                prefix_items.append(self._make_std_item(w))
+                seen.add(w)
+            elif do_substr and pre in wl:
+                substr_items.append(self._make_std_item(w))
+                seen.add(w)
+
         text = self.get_text()
-        seen = set(candidates)
+        classifications = self._parse_buffer_names(text)
         for m in re.finditer(r"\b[A-Za-z_][A-Za-z0-9_]{1,}\b", text):
             w = m.group(0)
-            if w.lower().startswith(pre) and w not in seen:
-                candidates.append(w)
-                seen.add(w)
-            if len(candidates) >= 40:
-                break
-        return candidates[:20]
+            if w in seen:
+                continue
+            seen.add(w)
+            wl = w.lower()
+            kind, detail = classifications.get(w, ("buffer", "local"))
+            item = CompletionItem(w, kind, detail, w, 0)
+            if wl.startswith(pre):
+                prefix_items.append(item)
+            elif do_substr and pre in wl:
+                substr_items.append(item)
+
+        prefix_items.sort(key=lambda it: len(it.text))
+        substr_items.sort(key=lambda it: len(it.text))
+        return (prefix_items + substr_items)[:50]
+
+    def _gather_attr_completions(self, obj_name: str, prefix: str) -> list[CompletionItem]:
+        """Complete attributes of a builtin object after a dot."""
+        obj = getattr(_builtins_mod, obj_name, None)
+        if obj is None:
+            return []
+        pre = prefix.lower()
+        do_substr = len(pre) >= 2
+        prefix_items: list[CompletionItem] = []
+        substr_items: list[CompletionItem] = []
+
+        for attr in dir(obj):
+            if attr.startswith("_"):
+                continue
+            al = attr.lower()
+            attr_obj = getattr(obj, attr, None)
+            if callable(attr_obj):
+                item = CompletionItem(attr, "builtin", "method", attr + "()", 1)
+            else:
+                item = CompletionItem(attr, "constant", "attr", attr, 0)
+            if al.startswith(pre):
+                prefix_items.append(item)
+            elif do_substr and pre in al:
+                substr_items.append(item)
+
+        prefix_items.sort(key=lambda it: len(it.text))
+        substr_items.sort(key=lambda it: len(it.text))
+        return (prefix_items + substr_items)[:50]
 
     def _show_completions(self) -> None:
-        """Compute completions for the current word and show the popover."""
         if not self._enable_autocomplete or self._completion_blocked:
             return
         start, end, word = self._current_word_bounds()
-        # Need at least 1 char to trigger
-        if len(word) < 1:
+        cursor_iter = self._buffer.get_iter_at_mark(self._buffer.get_insert())
+        line_end = cursor_iter.copy()
+        line_end.forward_to_line_end()
+        text_after = self._buffer.get_text(cursor_iter, line_end, True)
+        if text_after and not text_after.isspace():
             self._hide_completions()
+            self._clear_completion_list()
+            self._hide_ghost_text()
             return
-        candidates = self._gather_completions(word)
+        dot_obj = self._dot_object_before(start)
+        if len(word) < 1 and dot_obj is None:
+            self._hide_completions()
+            self._clear_completion_list()
+            self._hide_ghost_text()
+            return
+        if dot_obj is not None:
+            candidates = self._gather_attr_completions(dot_obj, word)
+        else:
+            candidates = self._gather_name_completions(word, exclude=word)
         if not candidates:
             self._hide_completions()
+            self._clear_completion_list()
+            self._hide_ghost_text()
             return
-        # If the only candidate equals the word exactly, hide
-        if len(candidates) == 1 and candidates[0] == word:
+        if len(candidates) == 1 and candidates[0].text == word:
             self._hide_completions()
+            self._clear_completion_list()
+            self._hide_ghost_text()
             return
 
-        self._completion_words = candidates
+        self._completion_words = [item.text for item in candidates]
         self._completion_prefix = word
 
-        # Populate list
+        self._clear_completion_list()
+
+        if len(candidates) == 1:
+            self._hide_completions()
+            self._update_ghost_text(candidates, word)
+            return
+
         lst = self._completion_list
-        # Clear existing rows
+        for item in candidates:
+            row = self._build_completion_row(item)
+            lst.append(row)
+        first = lst.get_first_child()
+        if first is not None:
+            lst.select_row(first)
+
+        self._completion_active = True
+        self._update_ghost_text(candidates, word)
+
+    def _hide_completions(self) -> None:
+        if self._completion_popover is not None:
+            self._completion_popover.popdown()
+        self._completion_active = False
+
+    def _clear_completion_list(self) -> None:
+        lst = self._completion_list
         while True:
             row = lst.get_first_child()
             if row is None:
                 break
             lst.remove(row)
-        for w in candidates:
-            label = Gtk.Label.new(w)
-            label.set_xalign(0.0)
-            label.set_halign(Gtk.Align.START)
-            row = Gtk.ListBoxRow.new()
-            row.set_child(label)
-            row.add_css_class("bluep-completion-row")
-            lst.append(row)
-        # Select first
-        first = lst.get_first_child()
-        if first is not None:
-            lst.select_row(first)
-
-        # Position popover at the start of the current word
-        location = self._view.get_iter_location(start)
-        # Convert buffer coords to window coords (GTK4 returns x, y only)
-        try:
-            x, y = self._view.buffer_to_window_coords(
-                Gtk.TextWindowType.TEXT,  # type: ignore[attr-defined]
-                location.x,
-                location.y + location.height,
-            )
-        except (ValueError, TypeError):
-            x, y = location.x, location.y + location.height
-        rect = Gdk.Rectangle()
-        rect.x = x
-        rect.y = y
-        rect.width = 1
-        rect.height = 1
-        self._completion_popover.set_pointing_to(rect)
-        if self._view.get_root() is not None:
-            self._completion_popover.popup()
-
-    def _hide_completions(self) -> None:
-        if self._completion_popover is not None:
-            self._completion_popover.popdown()
 
     def _completion_visible(self) -> bool:
-        return self._completion_popover is not None and self._completion_popover.is_visible()
+        return self._completion_active
 
     def _on_completion_activated(self, lst: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         self._apply_completion(row)
@@ -305,22 +551,24 @@ class CodeEditor(Gtk.Box):
     def _apply_completion(self, row: Gtk.ListBoxRow | None) -> None:
         if row is None:
             return
-        label = row.get_child()
-        if label is None:
-            return
-        text = label.get_text() if hasattr(label, "get_text") else ""
-        if not text:
+        item: CompletionItem | None = getattr(row, "completion_item", None)
+        if item is None:
             return
         start, end, word = self._current_word_bounds()
-        # Replace the current word with the completion
         self._completion_blocked = True
         self._buffer.delete(start, end)
-        self._buffer.insert(start, text, -1)
+        self._buffer.insert(start, item.insert, -1)
+        if item.cursor_back > 0:
+            cursor = self._buffer.get_insert()
+            iter_ = self._buffer.get_iter_at_mark(cursor)
+            for _ in range(item.cursor_back):
+                iter_.backward_char()
+            self._buffer.place_cursor(iter_)
         self._completion_blocked = False
         self._hide_completions()
+        self._hide_ghost_text()
 
     def _move_completion(self, direction: int) -> None:
-        """Move selection in the completion list (direction: +1 down, -1 up)."""
         lst = self._completion_list
         cur = lst.get_selected_row()
         if direction > 0:
@@ -334,6 +582,114 @@ class CodeEditor(Gtk.Box):
             nxt = lst.get_row_at_index(idx - 1) if idx > 0 else None
         if nxt is not None:
             lst.select_row(nxt)
+            self._scroll_completion_to_row(nxt)
+            item = getattr(nxt, "completion_item", None)
+            if item is not None and self._completion_prefix:
+                self._update_ghost_text([item], self._completion_prefix)
+
+    def _scroll_completion_to_row(self, row: Gtk.ListBoxRow) -> None:
+        scrolled = self._completion_popover.get_child()
+        if scrolled is None or not isinstance(scrolled, Gtk.ScrolledWindow):
+            return
+        vadj = scrolled.get_vadjustment()
+        row_h = row.get_allocated_height()
+        if row_h <= 0:
+            row_h = 24
+        row_y = row.get_index() * row_h
+        value = vadj.get_value()
+        page = vadj.get_page_size()
+        if row_y < value:
+            vadj.set_value(row_y)
+        elif row_y + row_h > value + page:
+            vadj.set_value(row_y + row_h - page)
+
+    def _on_overlay_get_child_position(
+        self, overlay: Gtk.Overlay, child: Gtk.Widget, rect: Gdk.Rectangle
+    ) -> bool:
+        if child is not self._ghost_label or not self._ghost_label.get_visible():
+            return False
+        cursor_mark = self._buffer.get_insert()
+        cursor_iter = self._buffer.get_iter_at_mark(cursor_mark)
+        location = self._view.get_iter_location(cursor_iter)
+        try:
+            x, y = self._view.buffer_to_window_coords(
+                Gtk.TextWindowType.WIDGET,  # type: ignore[attr-defined]
+                location.x,
+                location.y,
+            )
+        except (ValueError, TypeError):
+            x, y = location.x, location.y
+        result = self._view.translate_coordinates(overlay, float(x), float(y))
+        if result is not None:
+            rect.x = int(result[0])
+            rect.y = int(result[1])
+        else:
+            rect.x = x
+            rect.y = y
+        _min_w, nat_w, _min_b, _nat_b = self._ghost_label.measure(
+            Gtk.Orientation.HORIZONTAL, -1
+        )
+        rect.width = max(int(nat_w), 1)
+        rect.height = location.height if location.height > 0 else 20
+        return True
+
+    def _update_ghost_text(self, candidates: list[CompletionItem], word: str) -> None:
+        if not candidates or not word:
+            self._hide_ghost_text()
+            return
+        top = candidates[0]
+        insert = top.insert
+        if not insert.lower().startswith(word.lower()):
+            self._hide_ghost_text()
+            return
+        suffix = insert[len(word):]
+        if not suffix:
+            self._hide_ghost_text()
+            return
+        self._ghost_item = top
+        self._ghost_label.set_text(suffix)
+        self._ghost_label.set_visible(True)
+        self._ghost_label.queue_resize()
+
+    def _hide_ghost_text(self) -> None:
+        if self._ghost_label is not None:
+            self._ghost_label.set_visible(False)
+        self._ghost_item = None
+
+    def _accept_ghost_text(self) -> None:
+        item = self._ghost_item
+        if item is None:
+            return
+        start, end, _word = self._current_word_bounds()
+        self._completion_blocked = True
+        self._buffer.delete(start, end)
+        self._buffer.insert(start, item.insert, -1)
+        if item.cursor_back > 0:
+            cursor = self._buffer.get_insert()
+            iter_ = self._buffer.get_iter_at_mark(cursor)
+            for _ in range(item.cursor_back):
+                iter_.backward_char()
+            self._buffer.place_cursor(iter_)
+        self._completion_blocked = False
+        self._hide_ghost_text()
+        self._hide_completions()
+
+    def _schedule_completion(self) -> None:
+        if self._completion_debounce_id > 0:
+            GLib.source_remove(self._completion_debounce_id)
+        self._completion_debounce_id = GLib.timeout_add(
+            50, self._debounced_show_completions
+        )
+
+    def _debounced_show_completions(self) -> bool:
+        self._completion_debounce_id = 0
+        self._show_completions()
+        return False
+
+    def _on_destroy(self, widget: Gtk.Widget) -> None:
+        if self._completion_debounce_id > 0:
+            GLib.source_remove(self._completion_debounce_id)
+            self._completion_debounce_id = 0
 
     # ── Text insertion helpers ──────────────────────────────────────
 
@@ -441,6 +797,7 @@ class CodeEditor(Gtk.Box):
         self._insert_spaces = bool(getattr(ec, "insert_spaces", True))
         self._auto_indent = bool(getattr(ec, "auto_indent", True))
         self._enable_autocomplete = bool(getattr(ec, "enable_autocomplete", True))
+        self._completion_accept_key = str(getattr(ec, "completion_accept_key", "tab"))
 
         def _set(attr: str, method: str) -> None:
             if hasattr(view, method):
@@ -454,48 +811,71 @@ class CodeEditor(Gtk.Box):
         _set("highlight_current_line", "set_highlight_current_line")
 
         if self._has_sourceview:
-            try:
-                from gi.repository import GtkSource
-                highlight = bool(getattr(ec, "enable_syntax_highlighting", True))
-                if highlight:
-                    manager = GtkSource.LanguageManager.new()
-                    lang = manager.get_language("python")
-                    if lang:
-                        self._buffer.set_language(lang)
-                else:
-                    self._buffer.set_language(None)
-            except (ImportError, ValueError):
-                pass
+            highlight = bool(getattr(ec, "enable_syntax_highlighting", True))
+            if highlight:
+                lang = _get_python_language()
+                if lang:
+                    self._buffer.set_language(lang)
+            else:
+                self._buffer.set_language(None)
 
-        # Apply font via CSS (works in both GtkSourceView and TextView)
-        font_family = str(getattr(ec, "font_family", "Monospace"))
-        font_size = int(getattr(ec, "font_size", 12))
-        # Escape family for CSS (quote if it contains spaces)
+        self._font_family = str(getattr(ec, "font_family", "Monospace"))
+        self._font_size = int(getattr(ec, "font_size", 12))
+        self._apply_font_css()
+
+    def _apply_font_css(self) -> None:
+        font_family = self._font_family
         if " " in font_family or "," in font_family:
             font_family = f'"{font_family}"'
         css = (
             "textview.bluep-editor, "
-            "textview.bluep-editor text {\n"
+            "textview.bluep-editor text, "
+            "label.bluep-ghost-text {\n"
             f"  font-family: {font_family}, monospace;\n"
-            f"  font-size: {font_size}pt;\n"
+            f"  font-size: {self._font_size}pt;\n"
             "}\n"
         )
         try:
-            provider = Gtk.CssProvider.new()
-            provider.load_from_data(css.encode("utf-8"))
+            if self._css_provider is not None:
+                self._view.get_style_context().remove_provider(self._css_provider)
+                if self._ghost_label is not None:
+                    self._ghost_label.get_style_context().remove_provider(
+                        self._css_provider
+                    )
+            self._css_provider = Gtk.CssProvider.new()
+            self._css_provider.load_from_data(css.encode("utf-8"))
             self._view.get_style_context().add_provider(
-                provider, Gtk.STYLE_PROVIDER_PRIORITY_USER
+                self._css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER
             )
+            if self._ghost_label is not None:
+                self._ghost_label.get_style_context().add_provider(
+                    self._css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER
+                )
         except Exception:
             pass
-        # Keep a Pango description for tests/inspection
         try:
             desc = Pango.FontDescription.new()
-            desc.set_family(getattr(ec, "font_family", "Monospace"))
-            desc.set_size(font_size * 1024)
+            desc.set_family(self._font_family)
+            desc.set_size(self._font_size * 1024)
             self._font_desc = desc
         except Exception:
             pass
+
+    def set_font_size(self, size: int) -> None:
+        size = max(6, min(48, size))
+        if size == self._font_size:
+            return
+        self._font_size = size
+        self._apply_font_css()
+
+    def zoom_in(self) -> None:
+        self.set_font_size(self._font_size + 1)
+
+    def zoom_out(self) -> None:
+        self.set_font_size(self._font_size - 1)
+
+    def zoom_reset(self) -> None:
+        self.set_font_size(12)
 
     # ── Save / load ──────────────────────────────────────────────────
 
@@ -590,9 +970,8 @@ class CodeEditor(Gtk.Box):
         if not self._modified:
             self._modified = True
             self.emit("modified-changed", True)
-        # Trigger completions after a buffer change (unless we caused it)
         if not self._completion_blocked:
-            self._show_completions()
+            self._schedule_completion()
 
     # ── Key handling ─────────────────────────────────────────────────
 
@@ -618,6 +997,17 @@ class CodeEditor(Gtk.Box):
             self._hide_completions()
             return True
 
+        # Ctrl+Plus / Ctrl+Minus = zoom font size
+        if ctrl and keyval in (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add):
+            self.zoom_in()
+            return True
+        if ctrl and keyval in (Gdk.KEY_minus, Gdk.KEY_KP_Subtract):
+            self.zoom_out()
+            return True
+        if ctrl and keyval == Gdk.KEY_0:
+            self.zoom_reset()
+            return True
+
         # Ctrl+space = force completion
         if ctrl and keyval in (ord(" "), Gdk.KEY_space):
             self._show_completions()
@@ -627,12 +1017,17 @@ class CodeEditor(Gtk.Box):
         if self._completion_visible():
             if keyval == Gdk.KEY_Escape:
                 self._hide_completions()
+                self._hide_ghost_text()
                 return True
-            if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab):
+            accept_keys = {Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab}
+            if self._completion_accept_key == "enter":
+                accept_keys = {Gdk.KEY_Return, Gdk.KEY_KP_Enter}
+            elif self._completion_accept_key == "tab":
+                accept_keys = {Gdk.KEY_Tab}
+            if keyval in accept_keys:
                 lst = self._completion_list
                 row = lst.get_selected_row() if lst is not None else None
                 self._apply_completion(row)
-                # For Tab, also insert a normal tab after completion
                 return True
             if keyval == Gdk.KEY_Down:
                 self._move_completion(+1)
@@ -640,10 +1035,33 @@ class CodeEditor(Gtk.Box):
             if keyval == Gdk.KEY_Up:
                 self._move_completion(-1)
                 return True
+            lst = self._completion_list
+            if keyval == Gdk.KEY_Home and lst is not None:
+                first = lst.get_first_child()
+                if first is not None:
+                    lst.select_row(first)
+                    self._scroll_completion_to_row(first)
+                return True
+            if keyval == Gdk.KEY_End and lst is not None:
+                last = lst.get_last_child()
+                if last is not None:
+                    lst.select_row(last)
+                    self._scroll_completion_to_row(last)
+                return True
+            if keyval == Gdk.KEY_Page_Down:
+                for _ in range(5):
+                    self._move_completion(+1)
+                return True
+            if keyval == Gdk.KEY_Page_Up:
+                for _ in range(5):
+                    self._move_completion(-1)
+                return True
 
-        # ── Tab key: insert configured spaces ──
+        # ── Tab key: accept ghost text or insert configured spaces ──
         if keyval == Gdk.KEY_Tab:
-            # If completion visible, handled above; otherwise insert tab
+            if self._ghost_label is not None and self._ghost_label.get_visible():
+                self._accept_ghost_text()
+                return True
             self._insert_tab()
             self._hide_completions()
             return True
@@ -664,6 +1082,7 @@ class CodeEditor(Gtk.Box):
         if keyval in (Gdk.KEY_Left, Gdk.KEY_Right, Gdk.KEY_Home, Gdk.KEY_End,
                        Gdk.KEY_BackSpace, Gdk.KEY_Delete):
             self._hide_completions()
+            self._hide_ghost_text()
 
         return False
 

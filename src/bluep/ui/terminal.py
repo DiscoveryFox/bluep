@@ -216,7 +216,27 @@ class Terminal(Gtk.Box):
     def _on_key(self, controller: Gtk.EventControllerKey, keyval: int,
                 keycode: int, state: Gdk.ModifierType) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
         if ctrl and keyval in (ord("k"), ord("K")):
             self.clear()
             return True
+        if ctrl and shift and keyval in (ord("c"), ord("C")):
+            self._copy_selection()
+            return True
+        if ctrl and keyval in (ord("a"), ord("A")):
+            self._select_all()
+            return True
         return False
+
+    def _copy_selection(self) -> None:
+        buffer = self._textview.get_buffer()
+        start, end = buffer.get_selection_bounds()
+        if start is None or end is None:
+            return
+        text = buffer.get_text(start, end, True)
+        clipboard = self.get_clipboard()
+        clipboard.set_text(text)
+
+    def _select_all(self) -> None:
+        buffer = self._textview.get_buffer()
+        buffer.select_range(buffer.get_start_iter(), buffer.get_end_iter())

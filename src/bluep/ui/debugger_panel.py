@@ -88,6 +88,10 @@ class DebuggerPanel(Gtk.Box):
         self.append(toolbar)
         self.append(Gtk.Separator.new(Gtk.Orientation.HORIZONTAL))
 
+        key_ctrl = Gtk.EventControllerKey.new()
+        key_ctrl.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(key_ctrl)
+
         # --- Content area: stack + variables side by side ---
         paned = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
         paned.set_vexpand(True)
@@ -187,9 +191,32 @@ class DebuggerPanel(Gtk.Box):
         self._btn_terminate.set_sensitive(False)
         self._status_label.set_text("Debugger ready")
 
-        # Clear lists
         self._clear_listbox(self._stack_list)
         self._clear_listbox(self._vars_list)
+
+    def _on_key_pressed(self, ctrl: Gtk.EventControllerKey, keyval: int, keycode: int, state: Gdk.ModifierType) -> bool:
+        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        if keyval == Gdk.KEY_F5:
+            if shift:
+                if self._btn_terminate.get_sensitive():
+                    self.emit("terminate")
+            else:
+                if self._btn_continue.get_sensitive():
+                    self.emit("continue-exec")
+            return True
+        if keyval == Gdk.KEY_F10 and not shift:
+            if self._btn_step.get_sensitive():
+                self.emit("step")
+            return True
+        if keyval == Gdk.KEY_F11:
+            if shift:
+                if self._btn_step_out.get_sensitive():
+                    self.emit("step-out")
+            else:
+                if self._btn_step_into.get_sensitive():
+                    self.emit("step-into")
+            return True
+        return False
 
     def _populate_stack(self, stack: list[StackFrame]) -> None:
         """Populate the call stack list."""

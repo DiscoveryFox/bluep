@@ -104,8 +104,9 @@ class EditorConfig:
     auto_indent: bool = True
     smart_backspace: bool = True
     enable_syntax_highlighting: bool = True
-    enable_autocomplete: bool = False
+    enable_autocomplete: bool = True
     enable_ai_completion: bool = False
+    completion_accept_key: str = "tab"
 
     @classmethod
     def from_env(cls) -> EditorConfig:
@@ -128,8 +129,9 @@ class EditorConfig:
             auto_indent=_bool("BLUEP_EDITOR_AUTO_INDENT", True),
             smart_backspace=_bool("BLUEP_EDITOR_SMART_BACKSPACE", True),
             enable_syntax_highlighting=_bool("BLUEP_EDITOR_SYNTAX_HIGHLIGHTING", True),
-            enable_autocomplete=_bool("BLUEP_EDITOR_AUTOCOMPLETE", False),
+            enable_autocomplete=_bool("BLUEP_EDITOR_AUTOCOMPLETE", True),
             enable_ai_completion=_bool("BLUEP_EDITOR_AI_COMPLETION", False),
+            completion_accept_key=os.getenv("BLUEP_EDITOR_COMPLETION_ACCEPT_KEY", "tab"),
         )
 
 

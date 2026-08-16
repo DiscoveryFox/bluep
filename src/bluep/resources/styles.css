@@ -124,10 +124,10 @@ headerbar.bluep-header {
 /* Autocomplete popover */
 popover.bluep-completion {
   background-color: #181825;
-  border: 1px solid #585b70;
+  border: 1px solid #313244;
   border-radius: 6px;
-  padding: 4px 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  padding: 3px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
 popover.bluep-completion list.bluep-completion-list {
@@ -135,19 +135,56 @@ popover.bluep-completion list.bluep-completion-list {
 }
 
 popover.bluep-completion row.bluep-completion-row {
-  padding: 4px 12px;
+  padding: 2px 8px;
   color: #cdd6f4;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 12px;
+  min-height: 20px;
+  border-radius: 4px;
+  margin: 0 3px;
+  transition: background-color 100ms ease, color 100ms ease;
 }
 
 popover.bluep-completion row.bluep-completion-row:selected {
-  background-color: #89b4fa;
-  color: #1e1e2e;
+  background-color: #313244;
+  color: #cdd6f4;
 }
 
 popover.bluep-completion row.bluep-completion-row:hover {
-  background-color: #313244;
+  background-color: rgba(49, 50, 68, 0.6);
+}
+
+.bluep-completion-badge {
+  font-size: 9px;
+  font-weight: bold;
+  min-width: 22px;
+  padding: 1px 0;
+  border-radius: 3px;
+}
+
+.bluep-completion-name {
+  color: #cdd6f4;
+}
+
+.bluep-completion-detail {
+  font-size: 11px;
+  color: #6c7086;
+}
+
+.bluep-kind-keyword  { background-color: rgba(203, 166, 247, 0.16); color: #cba6f7; }
+.bluep-kind-builtin  { background-color: rgba(137, 180, 250, 0.16); color: #89b4fa; }
+.bluep-kind-class    { background-color: rgba(249, 226, 175, 0.16); color: #f9e2af; }
+.bluep-kind-constant { background-color: rgba(250, 179, 135, 0.16); color: #fab387; }
+.bluep-kind-def      { background-color: rgba(166, 227, 161, 0.16); color: #a6e3a1; }
+.bluep-kind-buffer   { background-color: rgba(166, 227, 161, 0.16); color: #a6e3a1; }
+.bluep-kind-attr     { background-color: rgba(137, 220, 235, 0.16); color: #89dceb; }
+.bluep-kind-module   { background-color: rgba(245, 194, 231, 0.16); color: #f5c2e7; }
+.bluep-kind-import   { background-color: rgba(148, 226, 213, 0.16); color: #94e2d5; }
+
+/* Ghost text (inline completion preview) */
+.bluep-ghost-text {
+  color: #9399b2;
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
 }
 
 /* Terminal */
@@ -199,26 +236,80 @@ button.bluep-btn {
   background-color: #313244;
   color: #cdd6f4;
   border-radius: 6px;
+  border: 1px solid #45475a;
   padding: 6px 16px;
+  min-width: 80px;
+  transition: all 100ms ease;
 }
 
 button.bluep-btn:hover {
   background-color: #45475a;
+  border-color: #585b70;
+}
+
+button.bluep-btn:active {
+  background-color: #181825;
+  border-color: #89b4fa;
+}
+
+button.bluep-btn:disabled {
+  background-color: #1e1e2e;
+  color: #585b70;
+  border-color: #313244;
+}
+
+button.bluep-btn:focus-visible {
+  outline: 2px solid #89b4fa;
+  outline-offset: 1px;
 }
 
 button.bluep-btn-primary {
   background-color: #89b4fa;
   color: #1e1e2e;
   font-weight: bold;
+  border: 1px solid #b4befe;
 }
 
 button.bluep-btn-primary:hover {
   background-color: #b4befe;
+  border-color: #cdd6f4;
+}
+
+button.bluep-btn-primary:active {
+  background-color: #74c7ec;
+  border-color: #89b4fa;
+}
+
+button.bluep-btn-primary:disabled {
+  background-color: #313244;
+  color: #585b70;
+  border-color: #45475a;
+}
+
+button.bluep-btn-primary:focus-visible {
+  outline: 2px solid #f5c2e7;
+  outline-offset: 1px;
 }
 
 button.bluep-btn-danger {
   background-color: #f38ba8;
   color: #1e1e2e;
+  font-weight: bold;
+  border: 1px solid #eba0ac;
+}
+
+button.bluep-btn-danger:hover {
+  background-color: #eba0ac;
+}
+
+button.bluep-btn-danger:active {
+  background-color: #d20f39;
+}
+
+/* Dialog action area */
+.bluep-dialog-actions {
+  margin-top: 12px;
+  margin-bottom: 4px;
 }
 
 /* Search entry */
@@ -359,4 +450,128 @@ window.bluep-dialog {
 
 window.bluep-dialog headerbar {
   background-color: #181825;
+}
+
+/* Welcome page */
+.bluep-welcome-title {
+  font-size: 28px;
+  font-weight: bold;
+  color: #89b4fa;
+}
+
+.bluep-welcome-subtitle {
+  font-size: 14px;
+  color: #a6adc8;
+}
+
+.bluep-welcome-section {
+  font-size: 16px;
+  font-weight: bold;
+  color: #cba6f7;
+}
+
+.bluep-welcome-key {
+  font-family: monospace;
+  font-size: 12px;
+  background-color: #313244;
+  color: #cdd6f4;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.bluep-welcome-warning {
+  background-color: #30220e;
+  border: 1px solid #f9e2af;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #f9e2af;
+}
+
+.bluep-error-text {
+  color: #f38ba8;
+  font-size: 11px;
+}
+
+.bluep-param-warning {
+  color: #f9e2af;
+  font-size: 10px;
+  font-style: italic;
+}
+
+.bluep-ai-message-error {
+  background-color: #30241f;
+  border: 1px solid #f38ba8;
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #f38ba8;
+  font-size: 12px;
+}
+
+/* Graphical class editor */
+.bluep-editor-col-header {
+  background-color: #181825;
+  border-radius: 4px;
+  padding: 4px 6px;
+  color: #a6adc8;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.bluep-editor-row {
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+
+.bluep-editor-row-odd {
+  background-color: rgba(49, 50, 68, 0.45);
+}
+
+.bluep-editor-row-even {
+  background-color: transparent;
+}
+
+.bluep-editor-empty {
+  color: #585b70;
+  font-style: italic;
+  font-size: 12px;
+}
+
+button.bluep-btn-icon {
+  padding: 2px 4px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 4px;
+  border: 1px solid #45475a;
+  background-color: #313244;
+  color: #cdd6f4;
+}
+
+button.bluep-btn-icon:hover {
+  background-color: #45475a;
+  border-color: #585b70;
+}
+
+button.bluep-btn-icon:active {
+  background-color: #181825;
+  border-color: #89b4fa;
+}
+
+/* Editor restore button (thin vertical button on left edge) */
+button.bluep-editor-restore {
+  background-color: #181825;
+  color: #cdd6f4;
+  border: none;
+  border-right: 1px solid #313244;
+  border-radius: 0;
+  padding: 8px 2px;
+  min-width: 24px;
+}
+
+button.bluep-editor-restore:hover {
+  background-color: #313244;
+  color: #89b4fa;
+}
+
+button.bluep-editor-restore:active {
+  background-color: #45475a;
 }

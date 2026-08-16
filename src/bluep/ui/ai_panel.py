@@ -47,6 +47,10 @@ class AIPanel(Gtk.Box):
 
         self._messages: list[tuple[str, str]] = []  # (role, content)
         self._is_processing = False
+        self._poll_timeout_id = 0
+        self._poll_start_time = 0.0
+        self._history: list[str] = []
+        self._history_index: int = -1
 
         # --- Header ---
         header_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
@@ -225,6 +229,9 @@ class AIPanel(Gtk.Box):
         elif role == "assistant":
             bubble.add_css_class("bluep-ai-message-assistant")
             align = Gtk.Align.START
+        elif role == "error":
+            bubble.add_css_class("bluep-ai-message-error")
+            align = Gtk.Align.CENTER
         else:
             bubble.add_css_class("bluep-ai-message-system")
             align = Gtk.Align.CENTER
@@ -257,12 +264,28 @@ class AIPanel(Gtk.Box):
 
     def _on_key_pressed(self, controller: Gtk.EventControllerKey, keyval: int,
                         keycode: int, state: Gdk.ModifierType) -> bool:
-        """Handle key press in the input area."""
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
 
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not shift:
             self._send_message()
             return True
+
+        if keyval == Gdk.KEY_Up and not shift:
+            if self._history:
+                if self._history_index < 0:
+                    self._history_index = len(self._history)
+                self._history_index = max(0, self._history_index - 1)
+                self._input.get_buffer().set_text(self._history[self._history_index])
+                return True
+
+        if keyval == Gdk.KEY_Down and not shift:
+            if self._history and self._history_index >= 0:
+                self._history_index = min(len(self._history), self._history_index + 1)
+                if self._history_index < len(self._history):
+                    self._input.get_buffer().set_text(self._history[self._history_index])
+                else:
+                    self._input.get_buffer().set_text("")
+                return True
 
         return False
 
@@ -282,26 +305,28 @@ class AIPanel(Gtk.Box):
         if not text:
             return
 
-        # Clear input
         buffer.set_text("")
 
-        # Display user message
         self._add_message("user", text)
         self.emit("message-sent", text)
 
-        # Set processing state
+        self._history.append(text)
+        self._history_index = -1
+
         self._is_processing = True
         self._btn_send.set_sensitive(False)
         self._set_status("Thinking...")
 
-        # Set up message callback to receive AI responses
         self.agent.set_message_callback(self._on_ai_message)
+        try:
+            self.agent.chat_async(text)
+        except Exception as exc:
+            self._abort_processing(f"Failed to send: {exc}")
+            return
 
-        # Send to AI (async)
-        self.agent.chat_async(text)
-
-        # Poll for completion
-        GLib.timeout_add(500, self._check_ai_completion)
+        import time
+        self._poll_start_time = time.monotonic()
+        self._poll_timeout_id = GLib.timeout_add(500, self._check_ai_completion)
 
     def _on_ai_message(self, message: str) -> None:
         """Callback for AI messages - runs in AI thread, so use idle_add."""
@@ -319,18 +344,34 @@ class AIPanel(Gtk.Box):
         return False
 
     def _check_ai_completion(self) -> bool:
-        """Check if the AI has finished processing."""
         if self.agent is None:
+            self._is_processing = False
+            self._poll_timeout_id = 0
+            return False
+
+        import time
+        elapsed = time.monotonic() - self._poll_start_time
+        if elapsed > 120.0:
+            self._abort_processing("Request timed out (120s)")
             return False
 
         if not self.agent.is_running():
             self._is_processing = False
+            self._poll_timeout_id = 0
             self._btn_send.set_sensitive(True)
             self._set_status("Ready")
             self._input.grab_focus()
-            return False  # Stop polling
+            return False
 
-        return True  # Keep polling
+        return True
+
+    def _abort_processing(self, reason: str) -> None:
+        self._is_processing = False
+        self._poll_timeout_id = 0
+        self._btn_send.set_sensitive(True)
+        self._set_status("Error")
+        self._add_message("error", f"[error] {reason}")
+        self._input.grab_focus()
 
     def _set_status(self, status: str) -> None:
         """Update the status indicator."""
