@@ -15,19 +15,26 @@ Change the width in **Edit → Preferences → Editor → Tab width**.
 
 ## Autocomplete
 
+Completions appear as **inline ghost text** — a greyed-out preview of the top
+match shown immediately after the cursor. No dropdown popover is displayed.
+
 | Trigger | Behaviour |
 |---|---|
-| Type a word | Completions appear automatically after each keystroke |
+| Type a word | Ghost text appears showing the best match suffix |
 | `Ctrl+Space` | Force completion at the cursor |
-| `Up` / `Down` | Navigate the completion list |
-| `Tab` / `Enter` | Apply the selected completion |
-| `Escape` | Dismiss the completion popover |
+| `Up` / `Down` | Cycle candidates; ghost text updates to the selected match |
+| `Tab` or `Enter` | Accept the ghost text (configurable via *accept key*) |
+| `Escape` | Dismiss the ghost text |
 
 Completion sources:
 
 - Python keywords (`keyword.kwlist`)
 - Python builtins (`dir(builtins)`)
 - Words from the current buffer (case-insensitive prefix match)
+- Attribute completions after `.` on bench objects
+
+An overlap guard hides ghost text when non-whitespace text follows the cursor
+on the same line, preventing preview collisions with existing code.
 
 Enable/disable in **Edit → Preferences → Editor → Enable autocomplete**.
 
@@ -56,6 +63,8 @@ Breakpoints are used by the [debugger](debugger.md).
 | `Ctrl+S` | Save and compile |
 | `Ctrl+B` | Toggle breakpoint at cursor |
 | `Ctrl+Space` | Force autocomplete |
-| `Tab` | Insert configured spaces |
-| `Enter` | Newline with auto-indent |
-| `Escape` | Dismiss autocomplete popover |
+| `Ctrl+0/+/-` | Reset / zoom in / zoom out font size |
+| `Tab` | Insert configured spaces or accept ghost text |
+| `Enter` | Newline with auto-indent or accept ghost text |
+| `Up` / `Down` | Cycle autocomplete candidates (when ghost text visible) |
+| `Escape` | Dismiss ghost text |

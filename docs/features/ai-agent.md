@@ -1,5 +1,11 @@
 # AI agent
 
+!!! warning "Untested feature"
+    The AI agent panel is **untested**. The integration code is present and
+    configurable, but no end-to-end testing against a live AI provider has been
+    performed. Expect potential issues with API calls, response parsing, or
+    UI behaviour. Use at your own risk and report any problems.
+
 BlueP has an optional AI agent panel for code generation and assistance. It is
 disabled by default and can be completely locked out in
 [supervised mode](../configuration/supervised-mode.md).

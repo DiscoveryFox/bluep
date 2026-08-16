@@ -11,6 +11,10 @@ Key responsibilities:
 
 - **Tab management** — notebook with VSCode-style tabs, save indicators (`●`
   prefix when modified), close buttons
+- **Panel hide/show** — bottom notebook tabs (Terminal, Code Pad, Debugger,
+  AI) can be individually hidden via menu actions; the code editor can be
+  collapsed to a thin vertical restore button on the left edge; the welcome
+  tab has a close button for dismissal
 - **Supervised gating** — disables AI panel and locked settings tabs when
   `BLUEP_SUPERVISED=true`
 - **Dialogs** — error popups (`Gtk.AlertDialog`) for compile/instantiation
@@ -29,8 +33,9 @@ The Python code editor. Features:
 
 - **Tab key** — intercepts Tab to insert configured spaces (fixes GTK's
   8-space default)
-- **Autocomplete** — `Gtk.Popover` with `Gtk.ListBox`, sources from Python
-  keywords, builtins, and buffer words
+- **Autocomplete** — inline ghost text preview (no dropdown popover); sources
+  from Python keywords, builtins, buffer words, and bench object attributes;
+  `Up`/`Down` cycles candidates, `Tab`/`Enter` accepts
 - **Bracket auto-closing** — `()`, `[]`, `{}`, `''`, `""`
 - **Auto-indent** — copies leading whitespace, adds extra indent after `:`
 - **Breakpoints** — gutter click or `Ctrl+B`

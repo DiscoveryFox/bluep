@@ -32,11 +32,12 @@ uv run bluep
 
 - :material-file-code: **Visual class diagram** — drag, drop, rename, delete
 - :material-clipboard-list: **Object bench** — instantiate, call methods, inspect
-- :material-code-brackets: **Code editor** — autocomplete, bracket closing, configurable tabs
+- :material-code-brackets: **Code editor** — inline ghost-text autocomplete, bracket closing, configurable tabs
 - :material-console: **Code pad** — REPL-style expression evaluation
 - :material-bug: **Debugger** — breakpoints, step, variable inspection
-- :material-robot: **AI agent** — optional OpenAI-compatible integration
+- :material-robot: **AI agent** — optional OpenAI-compatible integration (untested)
 - :material-shield-lock: **Supervised mode** — classroom/exam deployment lock
+- :material-eye-off: **Collapsible panels** — hide terminal, debugger, AI, or collapse the editor to a thin side button
 
 !!! tip "Supervised mode"
     Set `BLUEP_SUPERVISED=true` in the environment to disable AI features and
