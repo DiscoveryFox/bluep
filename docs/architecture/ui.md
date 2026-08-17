@@ -30,6 +30,12 @@ Key responsibilities:
   failures, confirmation dialogs for delete and unsaved-close
 - **Editor wiring** — applies `EditorConfig` to each editor on open, connects
   modified/compile/breakpoint signals
+- **Keyboard shortcuts** — registered via `Gtk.Application.set_accels_for_action`
+  so they take priority over widget-level key bindings (e.g. GtkSourceView
+  consuming Ctrl+S). See the keyboard shortcuts table below.
+- **Command palette** — `Ctrl+Shift+P` opens a VSCode-style search box that
+  filters all window actions by name; `Enter` executes the selected command,
+  `Up`/`Down` navigates, `Escape` closes. Implemented in `command_palette.py`.
 
 ## `class_diagram.py`
 
@@ -84,3 +90,27 @@ Variable inspector and call-stack view during debugging.
 ## `ai_panel.py`
 
 Chat interface for the AI agent. Hidden when AI is disabled or supervised.
+
+## `command_palette.py`
+
+Modal popup triggered by `Ctrl+Shift+P` that lists all window actions and
+filters them by case-insensitive substring match. `Up`/`Down` navigates the
+filtered list, `Enter` activates the selected command, `Escape` closes. All
+19 registered window actions are available.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+N` | New Class |
+| `Ctrl+Shift+C` | Compile All |
+| `Ctrl+S` | Save Project |
+| `Ctrl+O` | Open Project |
+| `Ctrl+T` | Show Terminal |
+| `Ctrl+E` | Show Code Pad |
+| `Ctrl+D` | Show Debugger |
+| `Ctrl+I` | Show AI Panel |
+| `Ctrl+J` | Toggle Bottom Panel |
+| `Ctrl+Shift+E` | Hide Code Editor |
+| `Ctrl+Shift+P` | Command Palette |
+| `Ctrl+,` | Preferences |
