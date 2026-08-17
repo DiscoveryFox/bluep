@@ -558,28 +558,33 @@ class MainWindow(Gtk.ApplicationWindow):
             self.add_action(action)
 
     def _setup_shortcuts(self) -> None:
-        """Set up keyboard shortcuts."""
-        shortcuts = {
-            "<Ctrl>n": "win.new-class",
-            "<Ctrl><Shift>c": "win.compile-all",
-            "<Ctrl>s": "win.save-project",
-            "<Ctrl>t": "win.show-terminal",
-            "<Ctrl>e": "win.show-code-pad",
-            "<Ctrl>d": "win.show-debugger",
-            "<Ctrl>i": "win.show-ai",
-            "<Ctrl>o": "win.open-project",
+        """Register keyboard accelerators via the application.
+
+        Using Gtk.Application.set_accels_for_action instead of a
+        Gtk.ShortcutController ensures the shortcuts take priority over
+        widget-level key bindings (e.g. GtkSourceView consuming Ctrl+S).
+        """
+        app = self.get_application()
+        if app is None:
+            return
+
+        accels = {
+            "win.new-class": ["<Ctrl>N"],
+            "win.compile-all": ["<Ctrl><Shift>C"],
+            "win.save-project": ["<Ctrl>S"],
+            "win.show-terminal": ["<Ctrl>T"],
+            "win.show-code-pad": ["<Ctrl>E"],
+            "win.show-debugger": ["<Ctrl>D"],
+            "win.show-ai": ["<Ctrl>I"],
+            "win.open-project": ["<Ctrl>O"],
+            "win.command-palette": ["<Ctrl><Shift>P"],
+            "win.toggle-bottom-panel": ["<Ctrl>J"],
+            "win.hide-editor": ["<Ctrl><Shift>E"],
+            "win.preferences": ["<Ctrl>comma"],
         }
 
-        self._shortcut_controller = Gtk.ShortcutController.new()
-        self._shortcut_controller.set_scope(Gtk.ShortcutScope.MANAGED)
-
-        for shortcut, action in shortcuts.items():
-            trigger = Gtk.ShortcutTrigger.parse_string(shortcut)
-            action_obj = Gtk.CallbackAction.new(lambda _w, _a, act=action: self.activate_action(act.split(".")[1]) or True)
-            shortcut_item = Gtk.Shortcut.new(trigger, action_obj)
-            self._shortcut_controller.add_shortcut(shortcut_item)
-
-        self.add_controller(self._shortcut_controller)
+        for action_name, shortcuts in accels.items():
+            app.set_accels_for_action(action_name, shortcuts)
 
     # --- Action Handlers ---
 
