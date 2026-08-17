@@ -802,11 +802,6 @@ class MainWindow(Gtk.ApplicationWindow):
             self.diagram.reset_view()
             self._set_status("View reset")
 
-    def _show_bottom_panel(self) -> None:
-        """Ensure the bottom panel is visible."""
-        if not self._bottom_box.get_visible():
-            self._bottom_box.set_visible(True)
-
     def _action_preferences(self) -> None:
         """Show the preferences dialog and apply settings on Apply."""
         dialog = PreferencesDialog(self.config, parent=self)
@@ -1252,8 +1247,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self.terminal.write_error(f"Class '{class_name}' not found")
             return
 
-        self._show_bottom_panel()
-        self._bottom_notebook.set_current_page(2)  # Debugger tab
+        self._show_bottom_panel_named("Debugger")
         self.terminal.write_info(f"Debugging: creating {class_name}...")
 
         def _run() -> None:
@@ -1435,7 +1429,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_debugger_pause_idle(self, state: DebugState) -> bool:
         """Handle debugger pause in main thread."""
         self.debugger_panel.update_state(state)
-        self._bottom_notebook.set_current_page(2)  # Switch to debugger tab
+        self._show_bottom_panel_named("Debugger")
 
         # Show the current line in the editor
         if state.current_file and state.current_line:
