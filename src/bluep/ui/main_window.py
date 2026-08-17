@@ -793,8 +793,17 @@ class MainWindow(Gtk.ApplicationWindow):
         GLib.idle_add(lambda: self.ai_panel._input.grab_focus() and False)
 
     def _action_toggle_bottom_panel(self) -> None:
-        """Hide or show the bottom panel (terminal area)."""
-        self._bottom_box.set_visible(not self._bottom_box.get_visible())
+        """Hide or show the bottom panel (terminal area).
+
+        Toggling visible only works when there are tabs to show. If all
+        panels have been closed (notebook empty, bottom box auto-collapsed),
+        this no-ops rather than showing an empty box; the user restores
+        specific panels via the restore bar or the show-X actions.
+        """
+        if self._bottom_box.get_visible():
+            self._bottom_box.set_visible(False)
+        elif self._bottom_notebook.get_n_pages() > 0:
+            self._bottom_box.set_visible(True)
 
     def _action_reset_view(self) -> None:
         """Reset the class diagram zoom and pan."""
