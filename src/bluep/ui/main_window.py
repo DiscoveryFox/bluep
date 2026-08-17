@@ -450,6 +450,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page_num = self._editor_notebook.page_num(self._welcome_page)
         if page_num >= 0:
             self._editor_notebook.remove_page(page_num)
+        self._check_editor_auto_hide()
 
     def _hide_editor(self) -> None:
         self._editor_box.set_visible(False)
@@ -458,6 +459,16 @@ class MainWindow(Gtk.ApplicationWindow):
     def _show_editor(self) -> None:
         self._editor_box.set_visible(True)
         self._editor_restore_btn.set_visible(False)
+        if self._editor_notebook.get_n_pages() == 0:
+            page_num = self._editor_notebook.page_num(self._welcome_page)
+            if page_num < 0:
+                self._editor_notebook.append_page(
+                    self._welcome_page, self._build_welcome_tab())
+
+    def _check_editor_auto_hide(self) -> None:
+        if self._editor_notebook.get_n_pages() == 0:
+            self._editor_box.set_visible(False)
+            self._editor_restore_btn.set_visible(True)
 
     def _hide_bottom_panel(self, panel_name: str) -> None:
         if panel_name not in self._bottom_panels:
@@ -474,6 +485,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._restore_buttons[panel_name] = btn
         self._panel_restore_bar.append(btn)
         self._panel_restore_bar.set_visible(True)
+        if self._bottom_notebook.get_n_pages() == 0:
+            self._bottom_box.set_visible(False)
 
     def _show_bottom_panel_named(self, panel_name: str) -> None:
         if panel_name not in self._bottom_panels:
@@ -488,7 +501,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 widget, self._build_bottom_tab(panel_name))
         if not self._restore_buttons:
             self._panel_restore_bar.set_visible(False)
-        self._show_bottom_panel()
+        self._bottom_box.set_visible(True)
         page_num = self._bottom_notebook.page_num(widget)
         if page_num >= 0:
             self._bottom_notebook.set_current_page(page_num)
@@ -1047,6 +1060,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self._open_editors[class_name] = editor
         self._current_class = class_name
 
+        if not self._editor_box.get_visible():
+            self._show_editor()
+
         # Switch to the new tab
         page_num = self._editor_notebook.page_num(editor)
         self._editor_notebook.set_current_page(page_num)
@@ -1082,6 +1098,7 @@ class MainWindow(Gtk.ApplicationWindow):
         if page_num >= 0:
             self._editor_notebook.remove_page(page_num)
         del self._open_editors[class_name]
+        self._check_editor_auto_hide()
 
     def _on_editor_modified(self, editor: CodeEditor, modified: bool) -> None:
         """Update the tab label with a dirty marker when the editor changes."""
