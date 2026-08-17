@@ -11,9 +11,18 @@ Key responsibilities:
 
 - **Tab management** — notebook with VSCode-style tabs, save indicators (`●`
   prefix when modified), close buttons
-- **Panel hide/show** — bottom notebook tabs (Terminal, Code Pad, Debugger,
-  AI) can be individually hidden via menu actions; the code editor can be
-  collapsed to a thin vertical restore button on the left edge; the welcome
+- **Panel hide/show** — each bottom notebook tab (Terminal, Code Pad,
+  Debugger, AI) has a close button on its tab label; closing a tab moves
+  it to a labeled restore bar at the bottom of the editor area, and the
+  `show-terminal` / `show-code-pad` / `show-debugger` / `show-ai` actions
+  restore it. When all 4 bottom tabs are closed the bottom area
+  auto-collapses so the object bench expands to fill the space; restoring
+  any panel re-shows the bottom area. The `toggle-bottom-panel` menu item
+  hides the bottom area when visible, shows it only when there are tabs to
+  show, and no-ops when the notebook is empty. The code editor can be
+  collapsed to a thin vertical restore button on the right edge; when the
+  last editor tab is closed (via close button or dismissing the welcome
+  tab) the editor auto-hides and the restore button appears. The welcome
   tab has a close button for dismissal
 - **Supervised gating** — disables AI panel and locked settings tabs when
   `BLUEP_SUPERVISED=true`
