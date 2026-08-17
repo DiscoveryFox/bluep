@@ -51,6 +51,7 @@ from bluep.ui.dialogs import (
     RenameClassDialog,
 )
 from bluep.ui.class_editor import ClassEditorDialog
+from bluep.ui.command_palette import CommandPalette
 
 
 class MainWindow(Gtk.ApplicationWindow):
@@ -550,6 +551,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "reset-view": (self._action_reset_view, None),
             "preferences": (self._action_preferences, None),
             "about": (self._action_about, None),
+            "command-palette": (self._action_command_palette, None),
         }
 
         for name, (callback, param_type) in actions.items():
@@ -860,6 +862,32 @@ class MainWindow(Gtk.ApplicationWindow):
         about.set_transient_for(self)
         about.set_modal(True)
         about.show()
+
+    def _action_command_palette(self) -> None:
+        """Open the VSCode-style command palette (Ctrl+Shift+P)."""
+        commands = [
+            ("New Project", "win.new-project"),
+            ("Open Project", "win.open-project"),
+            ("Save Project", "win.save-project"),
+            ("New Class", "win.new-class"),
+            ("Compile All", "win.compile-all"),
+            ("Compile Current", "win.compile-current"),
+            ("Show Terminal", "win.show-terminal"),
+            ("Show Code Pad", "win.show-code-pad"),
+            ("Show Debugger", "win.show-debugger"),
+            ("Show AI Panel", "win.show-ai"),
+            ("Toggle Bottom Panel", "win.toggle-bottom-panel"),
+            ("Hide Code Editor", "win.hide-editor"),
+            ("Hide Terminal", "win.hide-terminal"),
+            ("Hide Code Pad", "win.hide-code-pad"),
+            ("Hide Debugger", "win.hide-debugger"),
+            ("Hide AI Panel", "win.hide-ai"),
+            ("Reset View", "win.reset-view"),
+            ("Preferences", "win.preferences"),
+            ("About", "win.about"),
+        ]
+        palette = CommandPalette(self, commands)
+        palette.present_with_focus()
 
     # --- Project Management ---
 

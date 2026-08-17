@@ -601,3 +601,44 @@ button.bluep-panel-restore-btn:hover {
 button.bluep-panel-restore-btn:active {
   background-color: #181825;
 }
+
+/* Command palette */
+window.bluep-command-palette {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 10px;
+}
+
+searchentry.bluep-palette-search {
+  border: none;
+  border-bottom: 1px solid #313244;
+  border-radius: 10px 10px 0 0;
+  background-color: #181825;
+  color: #cdd6f4;
+  padding: 10px 12px;
+  font-size: 1.05em;
+}
+
+searchentry.bluep-palette-search:focus {
+  background-color: #11111b;
+}
+
+list.bluep-palette-list {
+  background-color: #1e1e2e;
+}
+
+list.bluep-palette-list > row {
+  background-color: transparent;
+  color: #cdd6f4;
+  border-radius: 6px;
+}
+
+list.bluep-palette-list > row:selected {
+  background-color: #313244;
+  color: #89b4fa;
+}
+
+list.bluep-palette-list > row:hover {
+  background-color: #313244;
+}
