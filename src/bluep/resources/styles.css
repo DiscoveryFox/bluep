@@ -556,12 +556,12 @@ button.bluep-btn-icon:active {
   border-color: #89b4fa;
 }
 
-/* Editor restore button (thin vertical button on left edge) */
+/* Editor restore button (thin vertical button on right edge) */
 button.bluep-editor-restore {
   background-color: #181825;
   color: #cdd6f4;
   border: none;
-  border-right: 1px solid #313244;
+  border-left: 1px solid #313244;
   border-radius: 0;
   padding: 8px 2px;
   min-width: 24px;
@@ -574,4 +574,30 @@ button.bluep-editor-restore:hover {
 
 button.bluep-editor-restore:active {
   background-color: #45475a;
+}
+
+/* Panel restore bar (shows buttons for hidden bottom panels) */
+.bluep-panel-restore-bar {
+  background-color: #181825;
+  border-top: 1px solid #313244;
+  padding: 4px 8px;
+}
+
+button.bluep-panel-restore-btn {
+  background-color: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 0.85em;
+}
+
+button.bluep-panel-restore-btn:hover {
+  background-color: #45475a;
+  color: #89b4fa;
+  border-color: #585b70;
+}
+
+button.bluep-panel-restore-btn:active {
+  background-color: #181825;
 }

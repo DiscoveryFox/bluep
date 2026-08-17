@@ -141,6 +141,7 @@ class MainWindow(Gtk.ApplicationWindow):
         menu.append_section(None, Gio.Menu.new())
         menu.append("Hide Code Editor", "win.hide-editor")
         menu.append("Hide Terminal", "win.hide-terminal")
+        menu.append("Hide Code Pad", "win.hide-code-pad")
         menu.append("Hide Debugger", "win.hide-debugger")
         menu.append("Hide AI Panel", "win.hide-ai")
         menu.append_section(None, Gio.Menu.new())
@@ -159,18 +160,18 @@ class MainWindow(Gtk.ApplicationWindow):
         main_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
         self.set_child(main_box)
 
-        # --- Left edge: editor restore button (hidden by default) ---
-        self._editor_restore_btn = Gtk.Button.new_from_icon_name("go-next")
+        content_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        content_box.set_hexpand(True)
+        self._content_box = content_box
+        main_box.append(content_box)
+
+        # --- Right edge: editor restore button (hidden by default) ---
+        self._editor_restore_btn = Gtk.Button.new_from_icon_name("go-previous")
         self._editor_restore_btn.set_tooltip_text("Show Code Editor")
         self._editor_restore_btn.add_css_class("bluep-editor-restore")
         self._editor_restore_btn.connect("clicked", lambda b: self._show_editor())
         self._editor_restore_btn.set_visible(False)
         main_box.append(self._editor_restore_btn)
-
-        content_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
-        content_box.set_hexpand(True)
-        self._content_box = content_box
-        main_box.append(content_box)
 
         # --- Top section: class diagram + editor (side by side) ---
         self._top_paned = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
@@ -249,16 +250,23 @@ class MainWindow(Gtk.ApplicationWindow):
         self._bottom_notebook.add_css_class("bluep-notebook")
         self._bottom_notebook.set_vexpand(False)
 
+        self._bottom_panels: dict[str, Gtk.Widget] = {}
+        self._restore_buttons: dict[str, Gtk.Button] = {}
+
         # Terminal
         self.terminal = Terminal()
         self.terminal.connect("output-written", self._on_terminal_output)
-        self._bottom_notebook.append_page(self.terminal, Gtk.Label.new("Terminal"))
+        self._bottom_panels["Terminal"] = self.terminal
+        self._bottom_notebook.append_page(
+            self.terminal, self._build_bottom_tab("Terminal"))
 
         # Code Pad
         self.code_pad = CodePad(self.executor)
         self.code_pad.connect("expression-evaluated", self._on_code_pad_evaluated)
         self.code_pad.connect("object-created", self._on_code_pad_object_created)
-        self._bottom_notebook.append_page(self.code_pad, Gtk.Label.new("Code Pad"))
+        self._bottom_panels["Code Pad"] = self.code_pad
+        self._bottom_notebook.append_page(
+            self.code_pad, self._build_bottom_tab("Code Pad"))
 
         # Debugger
         self.debugger_panel = DebuggerPanel(self.debugger)
@@ -267,13 +275,22 @@ class MainWindow(Gtk.ApplicationWindow):
         self.debugger_panel.connect("step-out", lambda p: self._debugger_step("return"))
         self.debugger_panel.connect("continue-exec", lambda p: self._debugger_step("continue"))
         self.debugger_panel.connect("terminate", lambda p: self._debugger_terminate())
-        self._bottom_notebook.append_page(self.debugger_panel, Gtk.Label.new("Debugger"))
+        self._bottom_panels["Debugger"] = self.debugger_panel
+        self._bottom_notebook.append_page(
+            self.debugger_panel, self._build_bottom_tab("Debugger"))
 
         # AI Panel
         self.ai_panel = AIPanel()
-        self._bottom_notebook.append_page(self.ai_panel, Gtk.Label.new("AI"))
+        self._bottom_panels["AI"] = self.ai_panel
+        self._bottom_notebook.append_page(
+            self.ai_panel, self._build_bottom_tab("AI"))
 
         self._bottom_box.append(self._bottom_notebook)
+
+        self._panel_restore_bar = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
+        self._panel_restore_bar.add_css_class("bluep-panel-restore-bar")
+        self._panel_restore_bar.set_visible(False)
+        self._bottom_box.append(self._panel_restore_bar)
 
         # --- Vertical paned: upper section (resizable) / bottom panel (resizable) ---
         self._main_paned = Gtk.Paned.new(Gtk.Orientation.VERTICAL)
@@ -417,6 +434,18 @@ class MainWindow(Gtk.ApplicationWindow):
         tab_box.append(btn_close)
         return tab_box
 
+    def _build_bottom_tab(self, panel_name: str) -> Gtk.Widget:
+        tab_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 4)
+        tab_box._panel_name = panel_name
+        tab_label = Gtk.Label.new(panel_name)
+        tab_box.append(tab_label)
+        btn_close = Gtk.Button.new_from_icon_name("window-close")
+        btn_close.set_has_frame(False)
+        btn_close.set_size_request(20, 20)
+        btn_close.connect("clicked", lambda b: self._hide_bottom_panel(panel_name))
+        tab_box.append(btn_close)
+        return tab_box
+
     def _dismiss_welcome(self) -> None:
         page_num = self._editor_notebook.page_num(self._welcome_page)
         if page_num >= 0:
@@ -429,6 +458,40 @@ class MainWindow(Gtk.ApplicationWindow):
     def _show_editor(self) -> None:
         self._editor_box.set_visible(True)
         self._editor_restore_btn.set_visible(False)
+
+    def _hide_bottom_panel(self, panel_name: str) -> None:
+        if panel_name not in self._bottom_panels:
+            return
+        widget = self._bottom_panels[panel_name]
+        page_num = self._bottom_notebook.page_num(widget)
+        if page_num < 0:
+            return
+        self._bottom_notebook.remove_page(page_num)
+        btn = Gtk.Button.new_with_label(panel_name)
+        btn.add_css_class("bluep-panel-restore-btn")
+        btn.set_tooltip_text(f"Show {panel_name} panel")
+        btn.connect("clicked", lambda b: self._show_bottom_panel_named(panel_name))
+        self._restore_buttons[panel_name] = btn
+        self._panel_restore_bar.append(btn)
+        self._panel_restore_bar.set_visible(True)
+
+    def _show_bottom_panel_named(self, panel_name: str) -> None:
+        if panel_name not in self._bottom_panels:
+            return
+        if panel_name in self._restore_buttons:
+            btn = self._restore_buttons.pop(panel_name)
+            self._panel_restore_bar.remove(btn)
+        widget = self._bottom_panels[panel_name]
+        page_num = self._bottom_notebook.page_num(widget)
+        if page_num < 0:
+            self._bottom_notebook.append_page(
+                widget, self._build_bottom_tab(panel_name))
+        if not self._restore_buttons:
+            self._panel_restore_bar.set_visible(False)
+        self._show_bottom_panel()
+        page_num = self._bottom_notebook.page_num(widget)
+        if page_num >= 0:
+            self._bottom_notebook.set_current_page(page_num)
 
     def _build_status_bar(self) -> None:
         """Build the bottom status bar."""
@@ -467,9 +530,10 @@ class MainWindow(Gtk.ApplicationWindow):
             "show-ai": (self._action_show_ai, None),
             "toggle-bottom-panel": (self._action_toggle_bottom_panel, None),
             "hide-editor": (self._hide_editor, None),
-            "hide-terminal": (lambda: self._hide_bottom_tab("Terminal"), None),
-            "hide-debugger": (lambda: self._hide_bottom_tab("Debugger"), None),
-            "hide-ai": (lambda: self._hide_bottom_tab("AI"), None),
+            "hide-terminal": (lambda: self._hide_bottom_panel("Terminal"), None),
+            "hide-code-pad": (lambda: self._hide_bottom_panel("Code Pad"), None),
+            "hide-debugger": (lambda: self._hide_bottom_panel("Debugger"), None),
+            "hide-ai": (lambda: self._hide_bottom_panel("AI"), None),
             "reset-view": (self._action_reset_view, None),
             "preferences": (self._action_preferences, None),
             "about": (self._action_about, None),
@@ -697,26 +761,22 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _action_show_terminal(self) -> None:
         """Switch to the Terminal tab and focus it."""
-        self._show_bottom_panel()
-        self._bottom_notebook.set_current_page(0)
+        self._show_bottom_panel_named("Terminal")
         GLib.idle_add(lambda: self.terminal._textview.grab_focus() and False)
 
     def _action_show_code_pad(self) -> None:
         """Switch to the Code Pad tab and focus the input."""
-        self._show_bottom_panel()
-        self._bottom_notebook.set_current_page(1)
+        self._show_bottom_panel_named("Code Pad")
         GLib.idle_add(lambda: self.code_pad._input.grab_focus() and False)
 
     def _action_show_debugger(self) -> None:
         """Switch to the Debugger tab and focus the step button."""
-        self._show_bottom_panel()
-        self._bottom_notebook.set_current_page(2)
+        self._show_bottom_panel_named("Debugger")
         GLib.idle_add(lambda: self.debugger_panel._btn_step.grab_focus() and False)
 
     def _action_show_ai(self) -> None:
         """Switch to the AI Panel tab and focus the input."""
-        self._show_bottom_panel()
-        self._bottom_notebook.set_current_page(3)
+        self._show_bottom_panel_named("AI")
         GLib.idle_add(lambda: self.ai_panel._input.grab_focus() and False)
 
     def _action_toggle_bottom_panel(self) -> None:
@@ -733,15 +793,6 @@ class MainWindow(Gtk.ApplicationWindow):
         """Ensure the bottom panel is visible."""
         if not self._bottom_box.get_visible():
             self._bottom_box.set_visible(True)
-
-    def _hide_bottom_tab(self, label: str) -> None:
-        """Hide a bottom notebook tab by its label text."""
-        for i in range(self._bottom_notebook.get_n_pages()):
-            child = self._bottom_notebook.get_nth_page(i)
-            tab_label = self._bottom_notebook.get_tab_label(child)
-            if tab_label and hasattr(tab_label, "get_label") and tab_label.get_label() == label:
-                self._bottom_notebook.remove_page(i)
-                break
 
     def _action_preferences(self) -> None:
         """Show the preferences dialog and apply settings on Apply."""
