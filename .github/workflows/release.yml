@@ -166,6 +166,17 @@ jobs:
           sudo apt-get install -y python3-pip appstream
           sudo pip3 install appimage-builder
 
+      - name: Install Python 3.14 and GTK4 build deps on host
+        # The appimage-builder script: phase runs on the host runner, not inside
+        # AppDir. python3.14 and the GTK4 dev headers are needed to compile
+        # pygobject/pycairo for python3.14 before the apt deploy phase runs.
+        run: |
+          sudo add-apt-repository -y ppa:deadsnakes/ppa
+          sudo apt-get update
+          sudo apt-get install -y python3.14 python3.14-dev python3.14-venv \
+            libgtk-4-dev libgirepository1.0-dev libcairo2-dev pkg-config
+          python3.14 -m ensurepip --upgrade || true
+
       - name: Substitute version into recipe
         run: |
           sed -i "s/__APP_VERSION__/${{ needs.bump.outputs.version }}/" packaging/appimage/appimage-builder.yml
