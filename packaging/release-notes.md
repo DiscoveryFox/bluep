@@ -2,6 +2,30 @@
 
 A BlueJ-inspired IDE for Python, built with GTK4 and PyGObject.
 
+BlueP mirrors the visual, object-oriented workflow of BlueJ — class diagrams,
+an interactive object bench, instant object inspection, a code pad — and
+adapts it to Python. It is designed for teaching object-oriented programming
+and for rapid prototyping of class-based Python projects.
+
+## Highlights
+
+- **Visual class diagram** — drag-and-drop class boxes with live dependency
+  arrows; create, rename, and delete classes from the diagram
+- **Interactive object bench** — instantiate any class, call methods, inspect
+  fields, keep live objects for experimentation
+- **Code editor** — syntax-highlighted (GtkSourceView 5) with autocomplete,
+  bracket auto-closing, auto-indent, line numbers, and breakpoint gutter
+- **Code pad** — REPL-style scratch pad for evaluating Python expressions
+  against the current project state
+- **Debugger** — step-by-step debugging with variable inspection, breakpoint
+  management, and call-stack view
+- **AI agent panel** — optional OpenAI-compatible integration for code
+  generation (disabled by default, lockable via supervised mode)
+- **Supervised mode** — classroom/exam lock (`BLUEP_SUPERVISED=true`) that
+  disables AI features and interpreter settings
+- **Native installers** for Linux (AppImage, Flatpak, DEB, RPM), Windows
+  (Inno Setup installer, portable zip), and macOS (DMG)
+
 ## Install
 
 ### Linux
@@ -84,4 +108,11 @@ bluep
 
 ## Changelog
 
-- See [commit history](https://github.com/DiscoveryFox/bluep/compare/vPREVIOUS...v{VERSION}) for changes in this release.
+- See [commit history](https://github.com/DiscoveryFox/bluep/compare/v{PREVIOUS}...v{VERSION}) for changes in this release.
+
+## System Requirements
+
+- **Linux (DEB/RPM):** Python ≥ 3.14 as system interpreter, GTK 4, PyGObject, GtkSourceView 5
+- **Linux (AppImage/Flatpak):** self-contained — no system dependencies required
+- **Windows:** Windows 10 or later
+- **macOS:** macOS 11 (Big Sur) or later
