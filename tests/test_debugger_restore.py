@@ -69,13 +69,14 @@ def run_tests(win, app):
     check("Debugger in restore bar",
           "Debugger" in win._restore_buttons)
 
-    # Hide the remaining 3 so the bottom box auto-collapses
+    # Hide the remaining 3 — bottom stays (restore bar), notebook hides
     for name in ["Terminal", "Code Pad", "AI"]:
         win._hide_bottom_panel(name)
     for _ in range(10):
         GLib.MainContext.default().iteration(False)
-    check("bottom_box auto-hidden when all 4 closed",
-          not win._bottom_box.get_visible())
+    check("bottom_box stays visible when all 4 closed",
+          win._bottom_box.get_visible())
+    check("notebook hidden when empty", not win._bottom_notebook.get_visible())
     check("no tabs in notebook", win._bottom_notebook.get_n_pages() == 0)
 
     # Simulate what _debug_instantiate and _on_debugger_pause_idle now do

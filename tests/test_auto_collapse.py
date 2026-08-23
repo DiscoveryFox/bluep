@@ -53,19 +53,22 @@ def run_tests(win, app):
     check("1 tab left after hiding 3", win._bottom_notebook.get_n_pages() == 1)
     check("bottom_box still visible with 1 tab", win._bottom_box.get_visible())
 
-    # Hide the last one — bottom should auto-collapse
+    # Hide the last one — bottom stays (restore bar), notebook hides
     win._hide_bottom_panel("AI")
     for _ in range(10):
         GLib.MainContext.default().iteration(False)
     check("0 tabs after hiding all", win._bottom_notebook.get_n_pages() == 0)
-    check("bottom_box auto-hidden when all closed", not win._bottom_box.get_visible())
+    check("bottom_box stays visible when all closed", win._bottom_box.get_visible())
+    check("notebook hidden when empty", not win._bottom_notebook.get_visible())
+    check("restore bar visible when all closed", win._panel_restore_bar.get_visible())
 
-    # Restore one — bottom should auto-expand
+    # Restore one — notebook reappears, divider resets
     win._show_bottom_panel_named("Terminal")
     for _ in range(10):
         GLib.MainContext.default().iteration(False)
     check("1 tab after restoring Terminal", win._bottom_notebook.get_n_pages() == 1)
-    check("bottom_box auto-shown when panel restored", win._bottom_box.get_visible())
+    check("notebook visible after restore", win._bottom_notebook.get_visible())
+    check("bottom_box visible after restore", win._bottom_box.get_visible())
 
     # Restore remaining 3
     for name in ["Code Pad", "Debugger", "AI"]:

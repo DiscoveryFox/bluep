@@ -40,6 +40,13 @@ def run_tests(win, app):
             failed += 1
             print(f"  FAIL: {name}")
 
+    def tab_name_at(idx):
+        page = win._bottom_notebook.get_nth_page(idx)
+        for name, widget in win._bottom_panels.items():
+            if widget is page:
+                return name
+        return None
+
     print("=== Editor Restore Button (Right Side) Tests ===")
 
     main_box = win.get_child()
@@ -104,6 +111,10 @@ def run_tests(win, app):
     check("notebook has 4 pages after restoring Debugger", win._bottom_notebook.get_n_pages() == 4)
     check("no restore buttons remain", len(win._restore_buttons) == 0)
     check("restore bar hidden when all restored", not win._panel_restore_bar.get_visible())
+    check("tab 0 is Terminal", tab_name_at(0) == "Terminal")
+    check("tab 1 is Code Pad", tab_name_at(1) == "Code Pad")
+    check("tab 2 is Debugger", tab_name_at(2) == "Debugger")
+    check("tab 3 is AI", tab_name_at(3) == "AI")
 
     # Hide all 4 panels
     for name in ["Terminal", "Code Pad", "Debugger", "AI"]:
@@ -112,6 +123,8 @@ def run_tests(win, app):
         GLib.MainContext.default().iteration(False)
     check("notebook has 0 pages after hiding all", win._bottom_notebook.get_n_pages() == 0)
     check("4 restore buttons", len(win._restore_buttons) == 4)
+    check("divider collapsed when all closed",
+          win._main_paned.get_position() >= win._main_paned.get_height() - 50)
 
     # Restore via action
     win.activate_action("win.show-terminal")
@@ -127,6 +140,10 @@ def run_tests(win, app):
     for _ in range(10):
         GLib.MainContext.default().iteration(False)
     check("all 4 restored", win._bottom_notebook.get_n_pages() == 4)
+    check("tab 0 is Terminal (action path)", tab_name_at(0) == "Terminal")
+    check("tab 1 is Code Pad (action path)", tab_name_at(1) == "Code Pad")
+    check("tab 2 is Debugger (action path)", tab_name_at(2) == "Debugger")
+    check("tab 3 is AI (action path)", tab_name_at(3) == "AI")
     win.activate_action("win.hide-code-pad")
     for _ in range(10):
         GLib.MainContext.default().iteration(False)

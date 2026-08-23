@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Verify _action_toggle_bottom_panel does not show an empty bottom box.
+"""Verify _action_toggle_bottom_panel flips the bottom area visibility.
 
-Regression covered: the old toggle was
-    self._bottom_box.set_visible(not self._bottom_box.get_visible())
-which, when all 4 panels were closed (notebook empty, bottom box
-auto-hidden), would show an empty box with 0 tabs — confusing.
-
-The new toggle hides when visible, shows only when there are tabs to
-show, and no-ops when the notebook is empty.
+Behavior: when all 4 panels are closed, the bottom box stays visible
+(showing just the restore bar) so panels are easy to reopen.  The toggle
+flips the entire bottom area on/off regardless of how many tabs remain.
 """
 import sys
 
@@ -55,30 +51,42 @@ def run_tests(win, app):
     check("bottom_box visible initially", win._bottom_box.get_visible())
     check("4 tabs initially", win._bottom_notebook.get_n_pages() == 4)
 
-    # Close all 4 tabs — bottom auto-collapses (iterate between hides)
+    # Close all 4 tabs — bottom stays visible (restore bar)
     for name in ["Terminal", "Code Pad", "Debugger", "AI"]:
         win._hide_bottom_panel(name)
         for _ in range(5):
             GLib.MainContext.default().iteration(False)
-    check("bottom_box auto-hidden when all closed",
-          not win._bottom_box.get_visible())
+    check("bottom_box stays visible when all closed",
+          win._bottom_box.get_visible())
+    check("notebook hidden when empty",
+          not win._bottom_notebook.get_visible())
+    check("restore bar visible", win._panel_restore_bar.get_visible())
     check("0 tabs in notebook", win._bottom_notebook.get_n_pages() == 0)
 
-    # Toggle while notebook empty — should NO-OP, not show empty box
+    # Toggle hides the entire bottom area (including restore bar)
     win._action_toggle_bottom_panel()
     for _ in range(10):
         GLib.MainContext.default().iteration(False)
-    check("toggle no-ops when notebook empty (box stays hidden)",
+    check("bottom_box hidden after toggle (empty)",
           not win._bottom_box.get_visible())
-    check("still 0 tabs in notebook",
-          win._bottom_notebook.get_n_pages() == 0)
 
-    # Restore one panel — toggle should work again
+    # Toggle shows it again — restore bar comes back
+    win._action_toggle_bottom_panel()
+    for _ in range(10):
+        GLib.MainContext.default().iteration(False)
+    check("bottom_box visible after toggle back (empty)",
+          win._bottom_box.get_visible())
+    check("restore bar still visible after toggle back",
+          win._panel_restore_bar.get_visible())
+
+    # Restore one panel — toggle should work with tabs too
     win._show_bottom_panel_named("Terminal")
     for _ in range(10):
         GLib.MainContext.default().iteration(False)
     check("bottom_box visible after restore",
           win._bottom_box.get_visible())
+    check("notebook visible after restore",
+          win._bottom_notebook.get_visible())
     check("1 tab in notebook", win._bottom_notebook.get_n_pages() == 1)
 
     # Toggle hidden with 1 tab

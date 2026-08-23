@@ -245,14 +245,15 @@ class MainWindow(Gtk.ApplicationWindow):
 
         # --- Bottom notebook: Terminal, Code Pad, Debugger, AI ---
         self._bottom_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
-        self._bottom_box.set_size_request(-1, 200)
 
         self._bottom_notebook = Gtk.Notebook.new()
         self._bottom_notebook.add_css_class("bluep-notebook")
-        self._bottom_notebook.set_vexpand(False)
+        self._bottom_notebook.set_vexpand(True)
+        self._bottom_notebook.set_size_request(-1, 200)
 
         self._bottom_panels: dict[str, Gtk.Widget] = {}
         self._restore_buttons: dict[str, Gtk.Button] = {}
+        self._bottom_panel_order: list[str] = ["Terminal", "Code Pad", "Debugger", "AI"]
 
         # Terminal
         self.terminal = Terminal()
@@ -487,7 +488,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._panel_restore_bar.append(btn)
         self._panel_restore_bar.set_visible(True)
         if self._bottom_notebook.get_n_pages() == 0:
-            self._bottom_box.set_visible(False)
+            self._bottom_notebook.set_visible(False)
+            self._collapse_bottom_divider()
 
     def _show_bottom_panel_named(self, panel_name: str) -> None:
         if panel_name not in self._bottom_panels:
@@ -497,15 +499,61 @@ class MainWindow(Gtk.ApplicationWindow):
             self._panel_restore_bar.remove(btn)
         widget = self._bottom_panels[panel_name]
         page_num = self._bottom_notebook.page_num(widget)
+        was_empty = self._bottom_notebook.get_n_pages() == 0
         if page_num < 0:
-            self._bottom_notebook.append_page(
-                widget, self._build_bottom_tab(panel_name))
+            self._bottom_notebook.insert_page(
+                widget, self._build_bottom_tab(panel_name),
+                self._bottom_panel_index(panel_name))
         if not self._restore_buttons:
             self._panel_restore_bar.set_visible(False)
         self._bottom_box.set_visible(True)
+        self._bottom_notebook.set_visible(True)
+        if was_empty:
+            self._reset_bottom_divider()
         page_num = self._bottom_notebook.page_num(widget)
         if page_num >= 0:
             self._bottom_notebook.set_current_page(page_num)
+
+    def _reset_bottom_divider(self) -> None:
+        """Reset the vertical paned divider so the bottom panel gets usable space.
+
+        While the bottom box was hidden (all panels closed), the Gtk.Paned
+        separator drifted to the bottom of the window because the invisible
+        end child no longer reserves space.  Without resetting, reopening a
+        single panel leaves it with almost no height.  This gives the bottom
+        roughly 40% of the available height (matching the initial 400/800
+        split) so the terminal, code pad, debugger, or AI panel looks good
+        on its own.
+        """
+        total = self._main_paned.get_height()
+        if total > 200:
+            self._main_paned.set_position(max(250, int(total * 0.6)))
+        else:
+            self._main_paned.set_position(400)
+
+    def _collapse_bottom_divider(self) -> None:
+        """Push the paned divider to the bottom so the upper section gets max space.
+
+        Called when all panels are closed: the notebook is hidden so the
+        bottom box shrinks to just the restore bar, and the divider moves
+        down to give the upper section the full remaining height.
+        """
+        total = self._main_paned.get_height()
+        if total > 0:
+            self._main_paned.set_position(total)
+
+    def _bottom_panel_index(self, panel_name: str) -> int:
+        """Return the notebook insertion index for *panel_name* to keep the fixed order."""
+        order = self._bottom_panel_order
+        if panel_name not in order:
+            return self._bottom_notebook.get_n_pages()
+        pos = order.index(panel_name)
+        idx = 0
+        for name in order[:pos]:
+            if name in self._bottom_panels and name != panel_name:
+                if self._bottom_notebook.page_num(self._bottom_panels[name]) >= 0:
+                    idx += 1
+        return idx
 
     def _build_status_bar(self) -> None:
         """Build the bottom status bar."""
@@ -800,17 +848,18 @@ class MainWindow(Gtk.ApplicationWindow):
         GLib.idle_add(lambda: self.ai_panel._input.grab_focus() and False)
 
     def _action_toggle_bottom_panel(self) -> None:
-        """Hide or show the bottom panel (terminal area).
+        """Hide or show the bottom panel area.
 
-        Toggling visible only works when there are tabs to show. If all
-        panels have been closed (notebook empty, bottom box auto-collapsed),
-        this no-ops rather than showing an empty box; the user restores
-        specific panels via the restore bar or the show-X actions.
+        Flips visibility of the entire bottom box.  When all panels have
+        been closed the bottom box stays visible showing just the restore
+        bar; the toggle lets the user collapse it entirely if desired.
         """
         if self._bottom_box.get_visible():
             self._bottom_box.set_visible(False)
-        elif self._bottom_notebook.get_n_pages() > 0:
+        else:
             self._bottom_box.set_visible(True)
+            if self._bottom_notebook.get_n_pages() > 0:
+                self._reset_bottom_divider()
 
     def _action_reset_view(self) -> None:
         """Reset the class diagram zoom and pan."""
