@@ -128,10 +128,7 @@ jobs:
             --depends gir1.2-gtk-4.0 \
             --depends gir1.2-gtksourceview-5 \
             --deb-compression xz \
-            packaging/assets/io.bluep.BlueP.desktop=/usr/share/applications/ \
-            packaging/assets/io.bluep.BlueP.metainfo.xml=/usr/share/metainfo/ \
-            packaging/assets/io.bluep.BlueP.svg=/usr/share/icons/hicolor/scalable/apps/
-          mv bluep_${{ needs.bump.outputs.version }}_amd64.deb bluep_${{ needs.bump.outputs.version }}_amd64.deb 2>/dev/null || true
+            usr
 
       - name: Build RPM
         run: |
@@ -144,9 +141,7 @@ jobs:
             --depends "python3-gobject" \
             --depends gtk4 \
             --depends gtksourceview5 \
-            packaging/assets/io.bluep.BlueP.desktop=/usr/share/applications/ \
-            packaging/assets/io.bluep.BlueP.metainfo.xml=/usr/share/metainfo/ \
-            packaging/assets/io.bluep.BlueP.svg=/usr/share/icons/hicolor/scalable/apps/
+            usr
 
       - uses: actions/upload-artifact@v4
         with:
@@ -198,6 +193,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.bump.outputs.tag }}
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build wheel (pre-built for offline flatpak install)
+        run: uv build --wheel
 
       - name: Install flatpak-builder
         run: |
@@ -306,8 +306,9 @@ jobs:
 
       - name: Install PyGObject + PyInstaller for python3.14
         run: |
-          python3.14 -m pip install --upgrade pip
-          python3.14 -m pip install pygobject pycairo pyinstaller
+          python3.14 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install pygobject pycairo pyinstaller
 
       - name: Generate .icns from SVG
         run: |
@@ -320,7 +321,7 @@ jobs:
           iconutil -c icns icon.iconset -o packaging/assets/io.bluep.BlueP.icns
 
       - name: Build with PyInstaller
-        run: python3.14 -m PyInstaller --noconfirm --clean packaging/bluep.spec
+        run: .venv/bin/python3.14 -m PyInstaller --noconfirm --clean packaging/bluep.spec
 
       - name: Create .dmg
         run: |

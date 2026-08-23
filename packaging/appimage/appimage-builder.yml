@@ -42,9 +42,7 @@ AppDir:
       - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main universe'
       - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main universe'
       - sourceline: 'ppa:deadsnakes/ppa'
-    keys:
-      # deadsnakes PPA signing key
-      - url: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A215C194819
+        key_url: 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A6CF475977595C89F51BA6932366A755776'
     include:
       # Python 3.14 runtime
       - python3.14

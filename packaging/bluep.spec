@@ -11,15 +11,15 @@
 from pathlib import Path
 import sys
 
-from PyInstaller.utils.hooks import collect_all, hooksconfig
+from PyInstaller.utils.hooks import collect_all
 
 # ── Collect the entire gi stack (typelibs, DLLs/dylibs, girepository) ──────────
 datas, binaries, hiddenimports = collect_all("gi")
 
 # Pin the exact typelib versions BlueP imports — see src/bluep/**/*.py
-# (gi.require_version calls). This makes PyInstaller's gi hook emit the right
-# module-versions config so the frozen app binds the correct libraries.
-hooksconfig.module_versions = {
+# (gi.require_version calls). Passed to Analysis() as hooksconfig so the
+# built-in hook-gi.repository.* hooks bind the correct typelib versions.
+gi_module_versions = {
     "Gtk": "4.0",
     "Gdk": "4.0",
     "Gio": "2.0",
@@ -83,6 +83,11 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
+    hooksconfig={
+        "gi": {
+            "module-versions": gi_module_versions,
+        },
+    },
 )
 
 pyz = PYZ(a.pure)

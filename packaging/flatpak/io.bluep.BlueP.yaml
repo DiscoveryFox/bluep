@@ -54,9 +54,10 @@ modules:
   - name: bluep
     buildsystem: simple
     build-commands:
-      # Install the app with the bundled Python 3.14. build-isolation fetches
-      # uv_build from PyPI inside the sandbox (network is available at build).
-      - /app/bin/python3.14 -m pip install --prefix=/app .
+      # Install the pre-built wheel (built by the release workflow on the runner
+      # with network). --no-deps --no-index avoids any network access inside the
+      # flatpak build sandbox (uv_build build-backend is unavailable offline).
+      - /app/bin/python3.14 -m pip install --no-deps --no-index --prefix=/app dist/bluep-*.whl
       # Desktop entry, metainfo, icon
       - install -Dm644 packaging/assets/io.bluep.BlueP.desktop /app/share/applications/io.bluep.BlueP.desktop
       - install -Dm644 packaging/assets/io.bluep.BlueP.metainfo.xml /app/share/metainfo/io.bluep.BlueP.metainfo.xml
