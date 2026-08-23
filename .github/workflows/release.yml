@@ -234,6 +234,8 @@ jobs:
           ln -sf usr/share/icons/hicolor/scalable/apps/io.bluep.BlueP.svg AppDir/.DirIcon
           # appimagetool expects the .desktop file at the AppDir root
           ln -sf usr/share/applications/io.bluep.BlueP.desktop AppDir/io.bluep.BlueP.desktop
+          # appimagetool expects the icon (matching Icon= key) at the AppDir root
+          ln -sf usr/share/icons/hicolor/scalable/apps/io.bluep.BlueP.svg AppDir/io.bluep.BlueP.svg
 
       - name: Create AppRun
         run: |
