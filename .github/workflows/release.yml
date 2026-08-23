@@ -193,15 +193,18 @@ jobs:
 
           # Install runtime packages on the host so apt resolves all transitive
           # dependencies, then copy every file into AppDir.
+          # gir1.2-gtksourceview-5 omitted: no install candidate on ubuntu-latest;
+          # if libgtksourceview-5-0 hard-depends on it, apt pulls it automatically.
           RUNTIME_PKGS="python3.14 \
             libgtk-4-1 libgtk-4-common libgtksourceview-5-0 libgtksourceview-5-common \
             libgirepository-1.0-1 libpango-1.0-0 libgraphene-1.0-0 \
-            gir1.2-gtk-4.0 gir1.2-gtksourceview-5 gir1.2-glib-2.0 \
+            gir1.2-gtk-4.0 gir1.2-glib-2.0 \
             gir1.2-pango-1.0 gir1.2-graphene-1.0 \
             libglib2.0-0 libxml2 libffi8 libgdk-pixbuf-2.0-0 \
             glib-networking gsettings-desktop-schemas \
             shared-mime-info hicolor-icon-theme adwaita-icon-theme"
 
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends $RUNTIME_PKGS
 
           # Resolve all transitive dependencies and copy their installed files
