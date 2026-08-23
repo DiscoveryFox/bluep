@@ -6,5 +6,12 @@ object bench, object inspection, a code editor, debugger, code pad,
 and AI agent integration.
 """
 
-__version__ = "1.0.0"
+from importlib.metadata import PackageNotFoundError, version
+
 __all__ = ["__version__"]
+
+try:
+    # Single source of truth: pyproject.toml [project].version
+    __version__: str = version("bluep")
+except PackageNotFoundError:  # running from source without install
+    __version__ = "0.0.0+dev"

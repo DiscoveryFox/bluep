@@ -14,3 +14,6 @@ wheels/
 
 # MkDocs build output
 site/
+
+# OpenCode agent state
+.omo/

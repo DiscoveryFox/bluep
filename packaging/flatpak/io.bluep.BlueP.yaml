@@ -1,0 +1,69 @@
+# Flatpak manifest for BlueP.
+#
+# Build locally:
+#   flatpak-builder --force-clean --install-deps-from=flathub \
+#       --repo=repo builddir packaging/flatpak/io.bluep.BlueP.yaml
+#   flatpak build-bundle repo io.bluep.BlueP.flatpak io.bluep.BlueP
+#
+# Python 3.14 requirement: BlueP requires Python >= 3.14 (pyproject.toml).
+# The GNOME 48 runtime ships Python 3.13, so we bundle Python 3.14 from source
+# as a build module. The release workflow fetches the current sha256 for the
+# Python 3.14.x tarball and substitutes __PYTHON314_SHA256__ before building.
+id: io.bluep.BlueP
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: bluep
+separate-locales: false
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home
+  # Read-only access to the host Python interpreters list is not needed;
+  # user projects live under --filesystem=home.
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+  - '*.a'
+  - '*.la'
+
+modules:
+  # ── Python 3.14 (bundled; runtime ships 3.13) ───────────────────────────────
+  - name: python3
+    only-arches:
+      - x86_64
+      - aarch64
+    buildsystem: simple
+    build-commands:
+      - ./configure --prefix=/app --enable-optimizations --with-ensurepip=install
+      - make -j "$(nproc)"
+      - make install
+    sources:
+      - type: archive
+        url: https://www.python.org/ftp/python/3.14.0/Python-3.14.0.tgz
+        # Filled in by the release workflow (sha256 of the 3.14.0 tarball).
+        sha256: __PYTHON314_SHA256__
+
+  # ── BlueP itself ─────────────────────────────────────────────────────────────
+  - name: bluep
+    buildsystem: simple
+    build-commands:
+      # Install the app with the bundled Python 3.14. build-isolation fetches
+      # uv_build from PyPI inside the sandbox (network is available at build).
+      - /app/bin/python3.14 -m pip install --prefix=/app .
+      # Desktop entry, metainfo, icon
+      - install -Dm644 packaging/assets/io.bluep.BlueP.desktop /app/share/applications/io.bluep.BlueP.desktop
+      - install -Dm644 packaging/assets/io.bluep.BlueP.metainfo.xml /app/share/metainfo/io.bluep.BlueP.metainfo.xml
+      - install -Dm644 packaging/assets/io.bluep.BlueP.svg /app/share/icons/hicolor/scalable/apps/io.bluep.BlueP.svg
+      # The bluep console script points at the runtime python; rewrite it to /app/bin/python3.14
+      - sed -i '1s|^#!.*|#!/app/bin/python3.14|' /app/bin/bluep
+    sources:
+      # CI builds from the checked-out source tree (two levels up from this file).
+      - type: dir
+        path: ../..

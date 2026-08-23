@@ -1,0 +1,394 @@
+name: Release
+
+# Triggers an automatic version bump + full multi-platform release build.
+# Run it: Actions tab → "Release" → "Run workflow" → choose bump level (patch/minor/major).
+# The workflow bumps pyproject.toml + uv.lock, tags v<version>, builds all
+# artifacts, and publishes a GitHub Release with per-platform install notes.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump level"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      prerelease:
+        description: "Mark release as a pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # ── 1. Bump version, commit, tag ─────────────────────────────────────────────
+  bump:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      previous_tag: ${{ steps.ver.outputs.previous_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Bump version in pyproject.toml + uv.lock
+        run: uv version --bump ${{ inputs.bump }}
+
+      - name: Read new version
+        id: ver
+        run: |
+          VERSION="$(uv run python -c 'from importlib.metadata import version; print(version("bluep"))')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$(git describe --tags --abbrev=0 HEAD~0 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+
+      - name: Commit bump and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+          git tag ${{ steps.ver.outputs.tag }}
+          git push origin "${{ github.ref_name }}"
+          git push origin ${{ steps.ver.outputs.tag }}
+
+  # ── 2. Python wheel + sdist (pip-installable from GitHub) ─────────────────────
+  wheel:
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*
+          if-no-files-found: error
+
+  # ── 3. Linux DEB + RPM (native, depends on system GTK4/PyGObject) ─────────────
+  linux-deb-rpm:
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build wheel (to stage package contents)
+        run: uv build --wheel
+
+      - name: Stage package tree
+        run: |
+          mkdir -p staging/usr/lib/python3/dist-packages staging/usr/bin
+          mkdir -p staging/usr/share/applications staging/usr/share/metainfo
+          mkdir -p staging/usr/share/icons/hicolor/scalable/apps
+          # Unzip the (pure-Python, py3-none-any) wheel into the dist-packages path.
+          unzip -o dist/bluep-*.whl -d staging/usr/lib/python3/dist-packages
+          # Console entry point
+          printf '#!/bin/sh\nexec python3 -m bluep "$@"\n' > staging/usr/bin/bluep
+          chmod +x staging/usr/bin/bluep
+          # Desktop integration
+          cp packaging/assets/io.bluep.BlueP.desktop staging/usr/share/applications/
+          cp packaging/assets/io.bluep.BlueP.metainfo.xml staging/usr/share/metainfo/
+          cp packaging/assets/io.bluep.BlueP.svg staging/usr/share/icons/hicolor/scalable/apps/
+
+      - name: Install fpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev
+          sudo gem install fpm --no-document
+
+      - name: Build DEB
+        run: |
+          fpm -C staging -s dir -t deb \
+            -n bluep -v ${{ needs.bump.outputs.version }} \
+            --description "A BlueJ-inspired IDE for Python" \
+            --url "https://discoveryfox.github.io/bluep/" \
+            --license GPL-3.0 \
+            --maintainer "BlueP Project" \
+            --depends "python3 (>= 3.14)" \
+            --depends python3-gi \
+            --depends gir1.2-gtk-4.0 \
+            --depends gir1.2-gtksourceview-5 \
+            --deb-compression xz \
+            packaging/assets/io.bluep.BlueP.desktop=/usr/share/applications/ \
+            packaging/assets/io.bluep.BlueP.metainfo.xml=/usr/share/metainfo/ \
+            packaging/assets/io.bluep.BlueP.svg=/usr/share/icons/hicolor/scalable/apps/
+          mv bluep_${{ needs.bump.outputs.version }}_amd64.deb bluep_${{ needs.bump.outputs.version }}_amd64.deb 2>/dev/null || true
+
+      - name: Build RPM
+        run: |
+          fpm -C staging -s dir -t rpm \
+            -n bluep -v ${{ needs.bump.outputs.version }} \
+            --description "A BlueJ-inspired IDE for Python" \
+            --url "https://discoveryfox.github.io/bluep/" \
+            --license GPL-3.0 \
+            --maintainer "BlueP Project" \
+            --depends "python3-gobject" \
+            --depends gtk4 \
+            --depends gtksourceview5 \
+            packaging/assets/io.bluep.BlueP.desktop=/usr/share/applications/ \
+            packaging/assets/io.bluep.BlueP.metainfo.xml=/usr/share/metainfo/ \
+            packaging/assets/io.bluep.BlueP.svg=/usr/share/icons/hicolor/scalable/apps/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb-rpm
+          path: |
+            *.deb
+            *.rpm
+          if-no-files-found: error
+
+  # ── 4. Linux AppImage (self-contained, bundles GTK4) ──────────────────────────
+  linux-appimage:
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - name: Install appimage-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip appstream
+          sudo pip3 install appimage-builder
+
+      - name: Substitute version into recipe
+        run: |
+          sed -i "s/__APP_VERSION__/${{ needs.bump.outputs.version }}/" packaging/appimage/appimage-builder.yml
+
+      - name: Build AppImage
+        run: appimage-builder --recipe packaging/appimage/appimage-builder.yml --skip-test
+
+      - name: Rename AppImage
+        run: |
+          mkdir -p out
+          mv BlueP-*.AppImage out/BlueP-${{ needs.bump.outputs.version }}-x86_64.AppImage 2>/dev/null || \
+            mv *.AppImage out/BlueP-${{ needs.bump.outputs.version }}-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: out/*.AppImage
+          if-no-files-found: error
+
+  # ── 5. Linux Flatpak (sandboxed, GNOME runtime) ───────────────────────────────
+  linux-flatpak:
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.gnome.Platform//48 org.gnome.Sdk//48
+
+      - name: Fetch Python 3.14 tarball sha256
+        run: |
+          set -euo pipefail
+          URL="https://www.python.org/ftp/python/3.14.0/Python-3.14.0.tgz"
+          SHA="$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)"
+          echo "Python 3.14.0 sha256: $SHA"
+          sed -i "s/__PYTHON314_SHA256__/$SHA/" packaging/flatpak/io.bluep.BlueP.yaml
+
+      - name: Build Flatpak
+        run: |
+          flatpak-builder --force-clean --install-deps-from=flathub \
+            --repo=repo builddir packaging/flatpak/io.bluep.BlueP.yaml
+          flatpak build-bundle repo io.bluep.BlueP.flatpak io.bluep.BlueP \
+            --runtime-version=48
+
+      - name: Rename Flatpak bundle
+        run: mv io.bluep.BlueP.flatpak BlueP-${{ needs.bump.outputs.version }}-x86_64.flatpak
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak
+          path: BlueP-${{ needs.bump.outputs.version }}-x86_64.flatpak
+          if-no-files-found: error
+
+  # ── 6. Windows installer (.exe) + portable zip ─────────────────────────────────
+  windows:
+    needs: bump
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: |
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-gobject
+            mingw-w64-ucrt-x86_64-gtksourceview5
+            mingw-w64-ucrt-x86_64-gobject-introspection
+            mingw-w64-ucrt-x86_64-imagemagick
+            mingw-w64-ucrt-x86_64-python-pip
+
+      - name: Install PyInstaller (MSYS2 UCRT64 python)
+        shell: msys2 {0}
+        run: python -m pip install pyinstaller
+
+      - name: Generate .ico from SVG
+        shell: msys2 {0}
+        run: |
+          magick packaging/assets/io.bluep.BlueP.svg \
+            -resize 256x256 \
+            -define icon:auto-resize=256,128,64,48,32,16 \
+            packaging/assets/io.bluep.BlueP.ico
+
+      - name: Build with PyInstaller
+        shell: msys2 {0}
+        run: python -m PyInstaller --noconfirm --clean packaging/bluep.spec
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" | Select-Object -First 1
+          & $iscc.FullName "/DAPP_VERSION=${{ needs.bump.outputs.version }}" packaging/windows/bluep.iss
+
+      - name: Create portable zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/BlueP/* -DestinationPath dist/BlueP-${{ needs.bump.outputs.version }}-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/BlueP-Setup-*.exe
+            dist/BlueP-${{ needs.bump.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+
+  # ── 7. macOS disk image (.dmg) ────────────────────────────────────────────────
+  macos:
+    needs: bump
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - name: Install GTK4 + PyGObject build deps via Homebrew
+        run: |
+          brew install gtk4 gtksourceview5 gobject-introspection \
+            pkg-config adwaita-icon-theme imagemagick python@3.14
+
+      - name: Install PyGObject + PyInstaller for python3.14
+        run: |
+          python3.14 -m pip install --upgrade pip
+          python3.14 -m pip install pygobject pycairo pyinstaller
+
+      - name: Generate .icns from SVG
+        run: |
+          mkdir -p icon.iconset
+          for size in 16 32 64 128 256 512; do
+            magick packaging/assets/io.bluep.BlueP.svg -resize ${size}x${size} icon.iconset/icon_${size}x${size}.png
+            magick packaging/assets/io.bluep.BlueP.svg -resize $((size*2))x$((size*2)) icon.iconset/icon_${size}x${size}@2x.png
+          done
+          magick packaging/assets/io.bluep.BlueP.svg -resize 1024x1024 icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o packaging/assets/io.bluep.BlueP.icns
+
+      - name: Build with PyInstaller
+        run: python3.14 -m PyInstaller --noconfirm --clean packaging/bluep.spec
+
+      - name: Create .dmg
+        run: |
+          mkdir -p staging
+          cp -R dist/BlueP.app staging/
+          ln -s /Applications staging/Applications
+          hdiutil create -volname BlueP \
+            -srcfolder staging \
+            -ov -format UDZO \
+            dist/BlueP-${{ needs.bump.outputs.version }}-macos.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/BlueP-${{ needs.bump.outputs.version }}-macos.dmg
+          if-no-files-found: error
+
+  # ── 8. Publish GitHub Release with install instructions ───────────────────────
+  release:
+    needs: [bump, wheel, linux-deb-rpm, linux-appimage, linux-flatpak, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts into release dir
+        run: |
+          mkdir -p release
+          find artifacts -type f \( \
+            -name "*.whl" -o -name "*.tar.gz" \
+            -o -name "*.AppImage" -o -name "*.flatpak" \
+            -o -name "*.deb" -o -name "*.rpm" \
+            -o -name "*.exe" -o -name "*.zip" \
+            -o -name "*.dmg" \) -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Generate release notes from template
+        run: |
+          VERSION="${{ needs.bump.outputs.version }}"
+          PREV="${{ needs.bump.outputs.previous_tag }}"
+          # Substitute template placeholders.
+          sed -e "s/{VERSION}/$VERSION/g" \
+              -e "s/{PREVIOUS}/$PREV/g" \
+              packaging/release-notes.md > release/RELEASE_NOTES.md
+          echo "## Release $VERSION" > release/notes.md
+          cat release/RELEASE_NOTES.md >> release/notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.bump.outputs.tag }}
+          name: BlueP ${{ needs.bump.outputs.version }}
+          body_path: release/notes.md
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            release/*.whl
+            release/*.tar.gz
+            release/*.AppImage
+            release/*.flatpak
+            release/*.deb
+            release/*.rpm
+            release/*.exe
+            release/*.zip
+            release/*.dmg
+          fail_on_unmatched_files: true

@@ -54,7 +54,53 @@ and for rapid prototyping of class-based Python projects.
   breakpoints require it)
 - [uv](https://docs.astral.sh/uv/) (recommended for running)
 
-## Quick start
+## Installation
+
+BlueP ships as native installers for every major platform, plus a Python
+wheel for `pip`. Every release on the
+[Releases page](https://github.com/DiscoveryFox/bluep/releases) includes
+per-platform install instructions.
+
+### pip (from GitHub)
+
+```bash
+# From a release wheel
+pip install https://github.com/DiscoveryFox/bluep/releases/download/v0.1.0/bluep-0.1.0-py3-none-any.whl
+
+# Or from a tag
+pip install git+https://github.com/DiscoveryFox/bluep.git@v0.1.0
+```
+
+then run `bluep`. The wheel does **not** bundle GTK4 — install the system
+dependencies first (see [Requirements](#requirements)).
+
+### Linux
+
+| Format | Install |
+|---|---|
+| **AppImage** | `chmod +x BlueP-*.AppImage && ./BlueP-*.AppImage` (portable, no install) |
+| **Flatpak** | `flatpak install BlueP-*.flatpak && flatpak run io.bluep.BlueP` |
+| **DEB** | `sudo apt install ./bluep_*_amd64.deb` |
+| **RPM** | `sudo dnf install ./bluep-*.rpm` |
+
+> The DEB/RPM depend on the system GTK4 + PyGObject packages and require
+> Python ≥ 3.14 as the system interpreter (Fedora 43+, Arch, etc.). On Ubuntu
+> LTS, use the AppImage or Flatpak instead.
+
+### Windows
+
+| Format | Install |
+|---|---|
+| **Installer** | Download `BlueP-Setup-*.exe` and double-click |
+| **Portable zip** | Unzip `BlueP-*-windows-x64.zip` and run `BlueP\BlueP.exe` |
+
+### macOS
+
+Download `BlueP-*-macos.dmg`, open it, and drag **BlueP** into
+**Applications**. On first launch you may see a Gatekeeper warning —
+right-click the app and choose **Open** to approve it.
+
+## Quick start (from source)
 
 ```bash
 # Clone
@@ -70,6 +116,24 @@ uv run bluep /path/to/my/project
 
 Copy `.env.example` to `.env` and adjust values as needed. After the first
 run, preferences are read from `~/.config/bluep/settings.json`.
+
+## Releases
+
+A GitHub Actions workflow (`.github/workflows/release.yml`) builds and
+publishes every release automatically. Trigger it from the **Actions** tab
+→ **Release** → **Run workflow**, choosing a `patch`/`minor`/`major` bump.
+The workflow:
+
+1. Bumps the version in `pyproject.toml` + `uv.lock` (single source of truth)
+   and tags `v<version>`.
+2. Builds a Python wheel + sdist.
+3. Builds native installers for Linux (AppImage, Flatpak, DEB, RPM), Windows
+   (Inno Setup `.exe`, portable `.zip`), and macOS (`.dmg`).
+4. Publishes a GitHub Release with per-platform install instructions.
+
+The app version lives in `pyproject.toml`; `src/bluep/__init__.py` reads it
+at runtime via `importlib.metadata`, so `uv version --bump <level>` is the
+only command needed to change it.
 
 ## Configuration
 
@@ -114,6 +178,7 @@ bluep/
 ├── src/bluep/
 │   ├── app.py              # Gtk.Application entry point, CSS theme loading
 │   ├── config.py           # Config dataclasses, env loading, JSON persistence
+│   ├── __init__.py         # __version__ read from importlib.metadata
 │   ├── __main__.py         # CLI entry point
 │   ├── core/
 │   │   ├── ai_agent.py     # AI agent integration
@@ -134,7 +199,17 @@ bluep/
 │   └── resources/
 │       └── styles.css      # Catppuccin Mocha dark theme
 ├── tests/                  # Test suite
-├── pyproject.toml
+├── packaging/               # Native installer recipes (used by release.yml)
+│   ├── assets/             # App icon (.svg), .desktop, AppStream metainfo
+│   ├── appimage/           # appimage-builder recipe
+│   ├── flatpak/            # Flatpak manifest (org.gnome.Sdk//48)
+│   ├── windows/            # Inno Setup .iss installer script
+│   ├── bluep.spec          # PyInstaller spec (Windows + macOS)
+│   └── release-notes.md    # Release page install-instructions template
+├── .github/workflows/
+│   ├── docs.yml            # MkDocs → GitHub Pages
+│   └── release.yml        # Version bump + multi-platform release build
+├── pyproject.toml          # Single source of truth for version
 ├── mkdocs.yml             # Documentation site config
 └── docs/                  # MkDocs source pages
 ```

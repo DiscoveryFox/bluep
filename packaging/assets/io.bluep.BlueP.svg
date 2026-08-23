@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <!-- Blue gradient: Catppuccin Mocha blue to deep indigo -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e66f5"/>
+      <stop offset="1" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <!-- Subtle inner highlight -->
+    <linearGradient id="hl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Blueprint grid pattern -->
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1"/>
+    </pattern>
+    <!-- Rounded square clip -->
+    <clipPath id="round">
+      <rect x="8" y="8" width="240" height="240" rx="48" ry="48"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#bg)"/>
+
+  <!-- Blueprint grid overlay (clipped to rounded square) -->
+  <g clip-path="url(#round)">
+    <rect x="8" y="8" width="240" height="240" fill="url(#grid)"/>
+  </g>
+
+  <!-- Inner highlight for depth -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#hl)"/>
+
+  <!-- Stylized "P" (Python / BlueP) — geometric, with a class-diagram node accent -->
+  <!-- Vertical stroke -->
+  <rect x="86" y="72" width="20" height="112" fill="#ffffff"/>
+  <!-- Top bowl: rounded rectangle ring forming the bowl of the P -->
+  <path d="
+    M 96 72
+    L 152 72
+    Q 172 72 172 96
+    L 172 112
+    Q 172 136 152 136
+    L 106 136
+    L 106 116
+    L 150 116
+    Q 152 116 152 114
+    L 152 94
+    Q 152 92 150 92
+    L 96 92
+    Z
+  " fill="#ffffff"/>
+
+  <!-- Small class-diagram node accent in the bowl (3px dots) -->
+  <circle cx="139" cy="104" r="4" fill="#1e66f5"/>
+  <circle cx="126" cy="104" r="4" fill="#1e66f5"/>
+</svg>

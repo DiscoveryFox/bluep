@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=BlueP
+GenericName=Python IDE
+Comment=A BlueJ-inspired IDE for Python
+Comment[de]=Eine von BlueJ inspirierte IDE für Python
+Exec=bluep %F
+Icon=io.bluep.BlueP
+Terminal=false
+Categories=Development;IDE;Education;
+Keywords=Python;IDE;BlueJ;Education;Programming;ClassDiagram;ObjectBench;
+Keywords[de]=Python;Entwicklungsumgebung;BlueJ;Bildung;Programmieren;
+StartupWMClass=BluePApp
+StartupNotify=true

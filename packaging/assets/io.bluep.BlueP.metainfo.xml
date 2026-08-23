@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.bluep.BlueP</id>
+
+  <name>BlueP</name>
+  <summary>A BlueJ-inspired IDE for Python, built with GTK4 and PyGObject</summary>
+  <summary xml:lang="de">Eine von BlueJ inspirierte IDE für Python, basierend auf GTK4 und PyGObject</summary>
+
+  <developer id="bluep.io">
+    <name>BlueP Project</name>
+  </developer>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0</project_license>
+
+  <description>
+    <p>
+      BlueP mirrors the visual, object-oriented workflow of BlueJ — class
+      diagrams, an interactive object bench, instant object inspection, a code
+      pad — and adapts it to Python. It is designed for teaching
+      object-oriented programming and for rapid prototyping of class-based
+      Python projects.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Visual class diagram with drag-and-drop class boxes and dependency arrows</li>
+      <li>Interactive object bench — instantiate classes, call methods, inspect fields</li>
+      <li>Syntax-highlighted code editor with autocomplete, bracket closing, and breakpoints</li>
+      <li>REPL-style code pad for evaluating Python expressions against project state</li>
+      <li>Step-by-step debugger with variable inspection and call-stack view</li>
+      <li>Optional AI agent panel (OpenAI-compatible), disabled by default and lockable in supervised mode</li>
+      <li>Supervised mode for classroom/exam deployment</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.bluep.BlueP.desktop</launchable>
+
+  <url type="homepage">https://discoveryfox.github.io/bluep/</url>
+  <url type="bugtracker">https://github.com/DiscoveryFox/bluep/issues</url>
+  <url type="help">https://discoveryfox.github.io/bluep/</url>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-cartoon">none</content_attribute>
+    <content_attribute id="violence-fantasy">none</content_attribute>
+    <content_attribute id="violence-realistic">none</content_attribute>
+    <content_attribute id="violence-bloodshed">none</content_attribute>
+    <content_attribute id="violence-sexual">none</content_attribute>
+    <content_attribute id="violence-desecration">none</content_attribute>
+    <content_attribute id="violence-slavery">none</content_attribute>
+    <content_attribute id="violence-worship">none</content_attribute>
+    <content_attribute id="drugs-alcohol">none</content_attribute>
+    <content_attribute id="drugs-narcotics">none</content_attribute>
+    <content_attribute id="drugs-tobacco">none</content_attribute>
+    <content_attribute id="sex-nudity">none</content_attribute>
+    <content_attribute id="sex-themes">none</content_attribute>
+    <content_attribute id="sex-homosexuality">none</content_attribute>
+    <content_attribute id="sex-prostitution">none</content_attribute>
+    <content_attribute id="sex-adultery">none</content_attribute>
+    <content_attribute id="sex-appearance">none</content_attribute>
+    <content_attribute id="language-profanity">none</content_attribute>
+    <content_attribute id="language-humor">none</content_attribute>
+    <content_attribute id="language-discrimination">none</content_attribute>
+    <content_attribute id="social-chat">none</content_attribute>
+    <content_attribute id="social-info">none</content_attribute>
+    <content_attribute id="social-audio">none</content_attribute>
+    <content_attribute id="social-location">none</content_attribute>
+    <content_attribute id="social-contacts">none</content_attribute>
+    <content_attribute id="money-purchasing">none</content_attribute>
+    <content_attribute id="money-gambling">none</content_attribute>
+  </content_rating>
+
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+
+  <provides>
+    <binary>bluep</binary>
+  </provides>
+
+  <releases>
+    <release version="0.1.0" date="2026-08-17">
+      <description>
+        <p>Initial release of BlueP.</p>
+      </description>
+    </release>
+  </releases>
+</component>
