@@ -160,16 +160,7 @@ jobs:
         with:
           ref: ${{ needs.bump.outputs.tag }}
 
-      - name: Install appimage-builder
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip appstream
-          sudo pip3 install appimage-builder
-
       - name: Install Python 3.14 and GTK4 build deps on host
-        # The appimage-builder script: phase runs on the host runner, not inside
-        # AppDir. python3.14 and the GTK4 dev headers are needed to compile
-        # pygobject/pycairo for python3.14 before the apt deploy phase runs.
         run: |
           sudo add-apt-repository -y ppa:deadsnakes/ppa
           sudo apt-get update
@@ -177,18 +168,79 @@ jobs:
             libgtk-4-dev libgirepository1.0-dev libglib2.0-dev libcairo2-dev pkg-config
           python3.14 -m ensurepip --upgrade || true
 
-      - name: Substitute version into recipe
+      - name: Build AppDir
         run: |
-          sed -i "s/__APP_VERSION__/${{ needs.bump.outputs.version }}/" packaging/appimage/appimage-builder.yml
+          set -e
+          mkdir -p AppDir/usr/{bin,lib/python3.14/site-packages,share}
+
+          # pip install bluep + pygobject (pinned <3.52 for gobject-introspection-1.0) + pycairo
+          python3.14 -m pip install --ignore-installed --no-cache-dir \
+            --target=AppDir/usr/lib/python3.14/site-packages \
+            "pygobject==3.48.2" pycairo .
+
+          # Console entry point
+          printf '#!/bin/sh\nexec python3.14 -m bluep "$@"\n' > AppDir/usr/bin/bluep
+          chmod +x AppDir/usr/bin/bluep
+
+          # Desktop integration assets
+          install -Dm644 packaging/assets/io.bluep.BlueP.desktop \
+            AppDir/usr/share/applications/io.bluep.BlueP.desktop
+          install -Dm644 packaging/assets/io.bluep.BlueP.metainfo.xml \
+            AppDir/usr/share/metainfo/io.bluep.BlueP.metainfo.xml
+          install -Dm644 packaging/assets/io.bluep.BlueP.svg \
+            AppDir/usr/share/icons/hicolor/scalable/apps/io.bluep.BlueP.svg
+
+          # Download runtime libraries and extract into AppDir.
+          # Clean apt cache first so only these packages end up there.
+          sudo apt-get clean
+          sudo apt-get install -y --download-only --no-install-recommends --reinstall \
+            python3.14 python3.14-minimal \
+            libgtk-4-1 libgtk-4-common libgtksourceview-5-0 libgtksourceview-5-common \
+            libgirepository-1.0-1 libpango-1.0-0 libgraphene-1.0-0 \
+            gir1.2-gtk-4.0 gir1.2-gtksourceview-5 gir1.2-glib-2.0 \
+            gir1.2-pango-1.0 gir1.2-graphene-1.0 \
+            libglib2.0-0 libxml2 libffi8 libgdk-pixbuf-2.0-0 \
+            glib-networking gsettings-desktop-schemas \
+            shared-mime-info hicolor-icon-theme adwaita-icon-theme
+
+          for deb in /var/cache/apt/archives/*.deb; do dpkg -x "$deb" AppDir; done
+
+          # Compile gsettings schemas and update icon/mime caches
+          glib-compile-schemas AppDir/usr/share/glib-2.0/schemas || true
+          gtk4-update-icon-cache -f -t AppDir/usr/share/icons/hicolor || true
+          update-mime-database AppDir/usr/share/mime || true
+          gdk-pixbuf-query-loaders --update-cache || true
+
+          # .DirIcon symlink for desktop integration
+          ln -sf usr/share/icons/hicolor/scalable/apps/io.bluep.BlueP.svg AppDir/.DirIcon
+
+      - name: Create AppRun
+        run: |
+          cat > AppDir/AppRun << 'APPRUN'
+          #!/bin/sh
+          export PYTHONHOME="$APPDIR/usr"
+          export PYTHONPATH="$APPDIR/usr/lib/python3.14/site-packages"
+          export GI_TYPELIB_PATH="$APPDIR/usr/lib/girepository-1.0:$APPDIR/usr/lib/x86_64-linux-gnu/girepository-1.0"
+          export GIO_MODULE_DIR="$APPDIR/usr/lib/x86_64-linux-gnu/gio/modules"
+          export GSETTINGS_SCHEMA_DIR="$APPDIR/usr/share/glib-2.0/schemas"
+          export GDK_PIXBUF_MODULEDIR="$APPDIR/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders"
+          export GTK_PATH="$APPDIR/usr"
+          export XDG_DATA_DIRS="$APPDIR/usr/share:/usr/share"
+          exec "$APPDIR/usr/bin/python3.14" -m bluep "$@"
+          APPRUN
+          chmod +x AppDir/AppRun
 
       - name: Build AppImage
-        run: appimage-builder --recipe packaging/appimage/appimage-builder.yml --skip-test
+        run: |
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage \
+            AppDir "BlueP-${{ needs.bump.outputs.version }}-x86_64.AppImage"
 
       - name: Rename AppImage
         run: |
           mkdir -p out
-          mv BlueP-*.AppImage out/BlueP-${{ needs.bump.outputs.version }}-x86_64.AppImage 2>/dev/null || \
-            mv *.AppImage out/BlueP-${{ needs.bump.outputs.version }}-x86_64.AppImage
+          mv BlueP-*.AppImage out/BlueP-${{ needs.bump.outputs.version }}-x86_64.AppImage
 
       - uses: actions/upload-artifact@v4
         with:
