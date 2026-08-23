@@ -43,7 +43,7 @@ AppDir:
       # deadsnakes PPA provides Python 3.14 for Ubuntu LTS.
       - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main universe'
       - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main universe'
-      - sourceline: 'ppa:deadsnakes/ppa'
+      - sourceline: 'deb [arch=amd64] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu noble main'
         key_url: 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A6CF475977595C89F51BA6932366A755776'
     include:
       # Python 3.14 runtime
