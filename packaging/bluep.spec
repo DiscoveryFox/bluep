@@ -13,6 +13,11 @@ import sys
 
 from PyInstaller.utils.hooks import collect_all
 
+# SPECPATH is set by PyInstaller to the directory containing this spec file
+# (packaging/). Analysis() resolves script, pathex, and datas paths relative to
+# SPECPATH, not CWD — so compute the repo root to use absolute paths.
+_repo_root = Path(SPECPATH).parent
+
 # ── Collect the entire gi stack (typelibs, DLLs/dylibs, girepository) ──────────
 datas, binaries, hiddenimports = collect_all("gi")
 
@@ -31,7 +36,7 @@ gi_module_versions = {
 
 # ── Bundle package data (CSS theme) ──────────────────────────────────────────
 # styles.css is loaded at runtime via Path(__file__).parent / "resources".
-pkg_resources = Path("src/bluep/resources")
+pkg_resources = _repo_root / "src" / "bluep" / "resources"
 if pkg_resources.exists():
     datas += [(str(pkg_resources), "bluep/resources")]
 
@@ -64,18 +69,18 @@ hiddenimports += [
 # ── Platform-specific icon ───────────────────────────────────────────────────
 icon = None
 if sys.platform == "win32":
-    ico = Path("packaging/assets/io.bluep.BlueP.ico")
+    ico = _repo_root / "packaging" / "assets" / "io.bluep.BlueP.ico"
     if ico.exists():
         icon = str(ico)
 elif sys.platform == "darwin":
-    icns = Path("packaging/assets/io.bluep.BlueP.icns")
+    icns = _repo_root / "packaging" / "assets" / "io.bluep.BlueP.icns"
     if icns.exists():
         icon = str(icns)
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
 a = Analysis(
-    ["src/bluep/__main__.py"],
-    pathex=["src"],
+    [str(_repo_root / "src" / "bluep" / "__main__.py")],
+    pathex=[str(_repo_root / "src")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

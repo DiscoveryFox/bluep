@@ -218,8 +218,7 @@ jobs:
         run: |
           flatpak-builder --force-clean --install-deps-from=flathub \
             --repo=repo builddir packaging/flatpak/io.bluep.BlueP.yaml
-          flatpak build-bundle repo io.bluep.BlueP.flatpak io.bluep.BlueP \
-            --runtime-version=48
+          flatpak build-bundle repo io.bluep.BlueP.flatpak io.bluep.BlueP
 
       - name: Rename Flatpak bundle
         run: mv io.bluep.BlueP.flatpak BlueP-${{ needs.bump.outputs.version }}-x86_64.flatpak

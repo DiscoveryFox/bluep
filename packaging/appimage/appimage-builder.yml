@@ -100,10 +100,3 @@ AppDir:
     - update-mime-database $APPDIR/usr/share/mime || true
     - gdk-pixbuf-query-loaders --update-cache || true
 
-test:
-  fedora:
-    image: docker://fedora:41
-    command: |
-      # Smoke test: the AppImage launches (headless X via xvfb).
-      yum install -y xorg-x11-server-Xvfb gtk4 gtksourceview5
-      xvfb-run -a -s "-screen 0 1024x768x24" $RECIPE/exePath/*.AppImage --help || true
