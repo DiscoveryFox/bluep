@@ -232,6 +232,8 @@ jobs:
 
           # .DirIcon symlink for desktop integration
           ln -sf usr/share/icons/hicolor/scalable/apps/io.bluep.BlueP.svg AppDir/.DirIcon
+          # appimagetool expects the .desktop file at the AppDir root
+          ln -sf usr/share/applications/io.bluep.BlueP.desktop AppDir/io.bluep.BlueP.desktop
 
       - name: Create AppRun
         run: |
