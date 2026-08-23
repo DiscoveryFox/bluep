@@ -13,8 +13,10 @@ script:
   # Stage the app into AppDir/usr via pip (using deadsnakes python3.14).
   # PyGObject must be built for python3.14 (apt's python3-gi targets system 3.12),
   # so we pip-install pygobject+pycairo first, compiling against the apt dev libs.
+  # pygobject is pinned to 3.48.2: pygobject >=3.52 requires girepository-2.0.pc
+  # (GLib 2.80+ merged introspection), unavailable on Ubuntu 24.04 LTS.
   - mkdir -p AppDir/usr/lib/python3.14/site-packages AppDir/usr/bin
-  - python3.14 -m pip install --ignore-installed --no-cache-dir --target=AppDir/usr/lib/python3.14/site-packages pygobject pycairo .
+  - python3.14 -m pip install --ignore-installed --no-cache-dir --target=AppDir/usr/lib/python3.14/site-packages "pygobject==3.48.2" pycairo .
   # Console entry point
   - printf '#!/bin/sh\nexec python3.14 -m bluep "$@"\n' > AppDir/usr/bin/bluep
   - chmod +x AppDir/usr/bin/bluep
